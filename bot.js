@@ -72,8 +72,19 @@ function isChatAllowed(ctx) {
 }
 
 /**
- * Check if a user is an admin in any whitelisted group and cache the result
+ * Helper function to delete user messages in DMs
+ * This helps keep the conversation clean in private chats
  */
+async function deleteUserMessage(ctx) {
+  if (ctx.chat.type === 'private') {
+    try {
+      await ctx.deleteMessage(ctx.message.message_id);
+    } catch (error) {
+      // Sometimes messages can't be deleted (too old, etc.), just log and continue
+      console.error('Failed to delete user message:', error.description || error);
+    }
+  }
+}
 async function checkAndCacheGroupAdmin(userId, bot) {
   // If already in explicit whitelist, no need to check
   if (WHITELISTED_USER_IDS.includes(userId)) {
@@ -259,17 +270,16 @@ async function sendPersistentExplainer(ctx) {
   let session = adminSessions.get(adminId) || {};
   if (!session.explainerSent) {
     const textLines = [
-      "Welcome to the Filter Configuration!",
+      "Welcome to the Filter Configuration\\!",
       "",
-      "Use the interactive menu or direct commands to manage banned username filters.",
-      "Filters can be plain text, include wildcards (* and ?) or be defined as a /regex/ literal (e.g., `/^bad.*user$/i`).",
+      "Use the interactive menu or direct commands to manage banned username filters\\.",
+      "Filters can be plain text, include wildcards \\(\\* and \\?\\) or be defined as a /regex/ literal \\(e\\.g\\., `/^bad\\.\\*user$/i`\\)\\.",
       "",
       "**Direct Commands:**",
       "• `/addFilter <pattern>` — Add a filter",
       "• `/removeFilter <pattern>` — Remove a filter",
       "• `/listFilters` — List all filters",
-      "",
-      "A single interactive menu message will help you perform actions without clutter. When no further input is required, the menu is deleted."
+      ""
     ];
     try {
       await ctx.reply(textLines.join('\n'), { 
@@ -281,7 +291,19 @@ async function sendPersistentExplainer(ctx) {
     } catch (error) {
       console.error("Failed to send explainer message:", error);
       // Try without markdown as fallback
-      await ctx.reply(textLines.join('\n'), { 
+      const plainTextLines = [
+        "Welcome to the Filter Configuration!",
+        "",
+        "Use the interactive menu or direct commands to manage banned username filters.",
+        "Filters can be plain text, include wildcards (* and ?) or be defined as a /regex/ literal (e.g., `/^bad.*user$/i`).",
+        "",
+        "Direct Commands:",
+        "• /addFilter <pattern> — Add a filter",
+        "• /removeFilter <pattern> — Remove a filter",
+        "• /listFilters — List all filters",
+        ""
+      ];
+      await ctx.reply(plainTextLines.join('\n'), { 
         parse_mode: undefined,
         disable_web_page_preview: true
       });
@@ -554,6 +576,10 @@ bot.command('addFilter', async (ctx) => {
   if (ctx.chat.type !== 'private') return;
   
   if (!(await isAuthorized(ctx))) return;
+  
+  // Delete the user's command message
+  await deleteUserMessage(ctx);
+  
   const parts = ctx.message.text.split(' ');
   if (parts.length < 2) {
     return ctx.reply('Usage: /addFilter <pattern>');
@@ -577,6 +603,10 @@ bot.command('removeFilter', async (ctx) => {
   if (ctx.chat.type !== 'private') return;
   
   if (!(await isAuthorized(ctx))) return;
+  
+  // Delete the user's command message
+  await deleteUserMessage(ctx);
+  
   const parts = ctx.message.text.split(' ');
   if (parts.length < 2) {
     return ctx.reply('Usage: /removeFilter <pattern>');
@@ -597,6 +627,10 @@ bot.command('listFilters', async (ctx) => {
   if (ctx.chat.type !== 'private') return;
   
   if (!(await isAuthorized(ctx))) return;
+  
+  // Delete the user's command message
+  await deleteUserMessage(ctx);
+  
   if (bannedPatterns.length === 0) {
     return ctx.reply('No filter patterns are currently set.');
   }
@@ -606,12 +640,51 @@ bot.command('listFilters', async (ctx) => {
 
 // Launch Bot
 
+// Cleanup function to properly terminate the bot
+const cleanup = (signal) => {
+  console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+  
+  // Clear all intervals (for monitoring)
+  Object.values(newJoinMonitors).forEach(interval => {
+    clearInterval(interval);
+  });
+  
+  // Stop the bot with a short timeout
+  bot.stop(signal);
+  
+  // Force exit after 1 second if normal shutdown fails
+  setTimeout(() => {
+    console.log('Forcing exit...');
+    process.exit(0);
+  }, 1000);
+};
+
+// Handle termination signals properly
+process.once('SIGINT', () => cleanup('SIGINT'));
+process.once('SIGTERM', () => cleanup('SIGTERM'));
+process.once('SIGUSR2', () => cleanup('SIGUSR2')); // For Nodemon restart
+
+// Start the bot
 loadBannedPatterns().then(() => {
   bot.launch()
-    .then(() => console.log('Bot started!'))
+    .then(() => {
+      console.log('Bot started!');
+      
+      // Display ASCII art or a clear message that the bot is running
+      console.log(`
+▄▄▄▄    ▄▄▄       ███▄    █     ▄▄▄▄    ▒█████  ▄▄▄█████▓
+▓█████▄ ▒████▄     ██ ▀█   █    ▓█████▄ ▒██▒  ██▒▓  ██▒ ▓▒
+▒██▒ ▄██▒██  ▀█▄  ▓██  ▀█ ██▒   ▒██▒ ▄██▒██░  ██▒▒ ▓██░ ▒░
+▒██░█▀  ░██▄▄▄▄██ ▓██▒  ▐▌██▒   ▒██░█▀  ▒██   ██░░ ▓██▓ ░ 
+░▓█  ▀█▓ ▓█   ▓██▒▒██░   ▓██░   ░▓█  ▀█▓░ ████▓▒░  ▒██▒ ░ 
+░▒▓███▀▒ ▒▒   ▓▒█░░ ▒░   ▒ ▒    ░▒▓███▀▒░ ▒░▒░▒░   ▒ ░░   
+▒░▒   ░   ▒   ▒▒ ░░ ░░   ░ ▒░   ▒░▒   ░   ░ ▒ ▒░     ░    
+ ░    ░   ░   ▒      ░   ░ ░     ░    ░ ░ ░ ░ ▒    ░      
+ ░            ░  ░         ░     ░          ░ ░           
+      ░                                ░                  
+     
+Bot is running. Press Ctrl+C to stop.
+      `);
+    })
     .catch(err => console.error('Bot launch error:', err));
 });
-
-// Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
