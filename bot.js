@@ -1,4 +1,4 @@
-// bot.mjs
+// bot.js
 
 import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
@@ -22,7 +22,7 @@ dotenv.config(); // Load env variables
 let bannedPatterns = [];
 
 /**
- * Store each admin’s session in a Map keyed by their Telegram user ID.  
+ * Store each admin's session in a Map keyed by their Telegram user ID.  
  * Session object fields:
  *   - chatId: the private chat or group chat id
  *   - menuMessageId: the message ID of the interactive prompt/inline menu
@@ -35,6 +35,18 @@ const adminSessions = new Map();
  * For monitoring new chat members (keyed by "<chatId>_<userId>")
  */
 const newJoinMonitors = {};
+
+/**
+ * Fun ban messages to display when a user is banned
+ */
+const banMessages = [
+  "Hasta la vista, baby! User {userId} has been terminated.",
+  "I'll be back... but user {userId} won't be.",
+  "User {userId} has been terminated. Come with me if you want to live.",
+  "Your clothes, your boots, and your CAC access. User {userId} has been terminated.",
+  "User {userId} is now terminated. Judgment Day has come.",
+  "Talk to the hand! User {userId} has been terminated."
+];
 
 // Utility Functions
 
@@ -74,6 +86,14 @@ async function isAuthorized(ctx) {
     }
   }
   return false;
+}
+
+/**
+ * Get a random ban message and format it with the userId
+ */
+function getRandomBanMessage(userId) {
+  const randomIndex = Math.floor(Math.random() * banMessages.length);
+  return banMessages[randomIndex].replace('{userId}', userId);
 }
 
 /**
@@ -150,6 +170,8 @@ function monitorNewMember(chatId, member) {
       const username = chatMember.user.username?.toLowerCase();
       if (username && isBanned(username)) {
         await bot.telegram.banChatMember(chatId, member.id);
+        const banMessage = getRandomBanMessage(member.id);
+        await bot.telegram.sendMessage(chatId, banMessage);
         console.log(`Banned user after name change: @${username} in chat ${chatId}`);
         clearInterval(interval);
         delete newJoinMonitors[key];
@@ -172,8 +194,12 @@ function monitorNewMember(chatId, member) {
 /**
  * Sends a persistent instructional message to the admin.
  * This message is sent once per session and is never edited or deleted.
+ * Only used in private chats with authorized admins.
  */
 async function sendPersistentExplainer(ctx) {
+  // Only send explainer in private chats
+  if (ctx.chat.type !== 'private') return;
+  
   const adminId = ctx.from.id;
   let session = adminSessions.get(adminId) || {};
   if (!session.explainerSent) {
@@ -181,7 +207,7 @@ async function sendPersistentExplainer(ctx) {
       "Welcome to the Filter Configuration!",
       "",
       "Use the interactive menu or direct commands to manage banned username filters.",
-      "Filters can be plain text, include wildcards (* and ?), or be defined as a /regex/ literal (e.g., `/^bad.*user$/i`).",
+      "Filters can be plain text, include wildcards (* and ?) or be defined as a /regex/ literal (e.g., `/^bad.*user$/i`).",
       "",
       "**Direct Commands:**",
       "• `/addFilter <pattern>` — Add a filter",
@@ -190,42 +216,67 @@ async function sendPersistentExplainer(ctx) {
       "",
       "A single interactive menu message will help you perform actions without clutter. When no further input is required, the menu is deleted."
     ];
-    await ctx.reply(textLines.join('\n'), { parse_mode: 'Markdown' });
-    session.explainerSent = true;
-    adminSessions.set(adminId, session);
+    try {
+      await ctx.reply(textLines.join('\n'), { 
+        parse_mode: 'MarkdownV2',
+        disable_web_page_preview: true
+      });
+      session.explainerSent = true;
+      adminSessions.set(adminId, session);
+    } catch (error) {
+      console.error("Failed to send explainer message:", error);
+      // Try without markdown as fallback
+      await ctx.reply(textLines.join('\n'), { 
+        parse_mode: undefined,
+        disable_web_page_preview: true
+      });
+      session.explainerSent = true;
+      adminSessions.set(adminId, session);
+    }
   }
 }
 
 /**
  * Shows or updates an interactive menu message.
+ * Only used in private chats with authorized admins.
  */
 async function showOrEditMenu(ctx, text, extra) {
+  // Only show menu in private chats
+  if (ctx.chat.type !== 'private') return;
+  
   const adminId = ctx.from.id;
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
   try {
     if (session.menuMessageId) {
       await ctx.telegram.editMessageText(
-        session.chat.id,
+        session.chatId,
         session.menuMessageId,
         null,
         text,
-        { parse_mode: 'Markdown', ...extra }
+        extra
       );
     } else {
-      const sent = await ctx.reply(text, { parse_mode: 'Markdown', ...extra });
+      const sent = await ctx.reply(text, extra);
       session.menuMessageId = sent.message_id;
+      session.chatId = ctx.chat.id;
     }
   } catch (err) {
-    const sent = await ctx.reply(text, { parse_mode: 'Markdown', ...extra });
+    console.error("Error showing/editing menu:", err);
+    const sent = await ctx.reply(text, extra);
     session.menuMessageId = sent.message_id;
+    session.chatId = ctx.chat.id;
   }
   adminSessions.set(adminId, session);
 }
 
 /**
  * Deletes the interactive menu message (if it exists) and sends a confirmation message.
+ * Only used in private chats with authorized admins.
  */
 async function deleteMenu(ctx, confirmationMessage) {
+  // Only for private chats
+  if (ctx.chat.type !== 'private') return;
+  
   const adminId = ctx.from.id;
   const session = adminSessions.get(adminId);
   if (session && session.menuMessageId) {
@@ -238,16 +289,20 @@ async function deleteMenu(ctx, confirmationMessage) {
     adminSessions.set(adminId, session);
   }
   if (confirmationMessage) {
-    await ctx.reply(confirmationMessage, { parse_mode: 'Markdown' });
+    await ctx.reply(confirmationMessage);
   }
 }
 
 /**
  * Prompts the admin to enter a pattern (via editing the menu message).
+ * Only used in private chats with authorized admins.
  */
 async function promptForPattern(ctx, actionLabel) {
+  // Only for private chats
+  if (ctx.chat.type !== 'private') return;
+  
   const text =
-    `Please enter the pattern to *${actionLabel}*.\n\n` +
+    `Please enter the pattern to ${actionLabel}.\n\n` +
     "You can use wildcards (* and ?), or /regex/ syntax.\n\n" +
     "Send `/cancel` to abort.";
   let session = adminSessions.get(ctx.from.id) || {};
@@ -271,6 +326,8 @@ bot.on('new_chat_members', async (ctx) => {
     if (username && isBanned(username)) {
       try {
         await ctx.banChatMember(member.id);
+        const banMessage = getRandomBanMessage(member.id);
+        await ctx.reply(banMessage);
         console.log(`Banned user immediately: @${username} in chat ${chatId}`);
       } catch (error) {
         console.error(`Failed to ban @${username}:`, error);
@@ -289,6 +346,8 @@ bot.on('message', async (ctx, next) => {
   if (username && isBanned(username)) {
     try {
       await ctx.banChatMember(ctx.from.id);
+      const banMessage = getRandomBanMessage(ctx.from.id);
+      await ctx.reply(banMessage);
       console.log(`Banned user (message): @${username} in chat ${ctx.chat.id}`);
     } catch (error) {
       console.error(`Failed to ban @${username}:`, error);
@@ -299,8 +358,11 @@ bot.on('message', async (ctx, next) => {
 });
 
 // --- Admin / Filter Configuration Workflow ---
-// This handler works for both private and group chats (if the user is authorized).
+// Restrict admin configuration to private chats only
 bot.on('text', async (ctx, next) => {
+  // Only process admin commands in private chats
+  if (ctx.chat.type !== 'private') return next();
+  
   if (!(await isAuthorized(ctx))) return next();
   const adminId = ctx.from.id;
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
@@ -363,6 +425,7 @@ bot.on('text', async (ctx, next) => {
     adminSessions.set(adminId, session);
     return;
   }
+  
   // No pending action: re-show the main interactive menu.
   const text =
     "Filter Management Menu\n\n" +
@@ -381,6 +444,11 @@ bot.on('text', async (ctx, next) => {
 
 // --- Inline Button Callbacks ---
 bot.on('callback_query', async (ctx) => {
+  // Only process callbacks in private chats
+  if (ctx.chat?.type !== 'private') {
+    return ctx.answerCbQuery('This action is only available in private chat.');
+  }
+  
   if (!(await isAuthorized(ctx))) {
     return ctx.answerCbQuery('Not authorized.');
   }
@@ -406,6 +474,9 @@ bot.on('callback_query', async (ctx) => {
 // --- Direct Commands (Optional) ---
 
 bot.command('addFilter', async (ctx) => {
+  // Only allow in private chats
+  if (ctx.chat.type !== 'private') return;
+  
   if (!(await isAuthorized(ctx))) return;
   const parts = ctx.message.text.split(' ');
   if (parts.length < 2) {
@@ -426,6 +497,9 @@ bot.command('addFilter', async (ctx) => {
 });
 
 bot.command('removeFilter', async (ctx) => {
+  // Only allow in private chats
+  if (ctx.chat.type !== 'private') return;
+  
   if (!(await isAuthorized(ctx))) return;
   const parts = ctx.message.text.split(' ');
   if (parts.length < 2) {
@@ -443,6 +517,9 @@ bot.command('removeFilter', async (ctx) => {
 });
 
 bot.command('listFilters', async (ctx) => {
+  // Only allow in private chats
+  if (ctx.chat.type !== 'private') return;
+  
   if (!(await isAuthorized(ctx))) return;
   if (bannedPatterns.length === 0) {
     return ctx.reply('No filter patterns are currently set.');
@@ -458,3 +535,7 @@ loadBannedPatterns().then(() => {
     .then(() => console.log('Bot started!'))
     .catch(err => console.error('Bot launch error:', err));
 });
+
+// Enable graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
