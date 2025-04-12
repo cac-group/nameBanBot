@@ -268,29 +268,14 @@ async function sendPersistentExplainer(ctx) {
   
   const adminId = ctx.from.id;
   let session = adminSessions.get(adminId) || {};
+  
+  // Reset the explainerSent flag if it was previously set
+  // This ensures the intro message is always sent
+  session.explainerSent = false;
+  
   if (!session.explainerSent) {
-    const textLines = [
-      "Welcome to the Filter Configuration\\!",
-      "",
-      "Use the interactive menu or direct commands to manage banned username filters\\.",
-      "Filters can be plain text, include wildcards \\(\\* and \\?\\) or be defined as a /regex/ literal \\(e\\.g\\., `/^bad\\.\\*user$/i`\\)\\.",
-      "",
-      "**Direct Commands:**",
-      "• `/addFilter <pattern>` — Add a filter",
-      "• `/removeFilter <pattern>` — Remove a filter",
-      "• `/listFilters` — List all filters",
-      ""
-    ];
     try {
-      await ctx.reply(textLines.join('\n'), { 
-        parse_mode: 'MarkdownV2',
-        disable_web_page_preview: true
-      });
-      session.explainerSent = true;
-      adminSessions.set(adminId, session);
-    } catch (error) {
-      console.error("Failed to send explainer message:", error);
-      // Try without markdown as fallback
+      // Plain text version (more reliable)
       const plainTextLines = [
         "Welcome to the Filter Configuration!",
         "",
@@ -303,12 +288,24 @@ async function sendPersistentExplainer(ctx) {
         "• /listFilters — List all filters",
         ""
       ];
+      
       await ctx.reply(plainTextLines.join('\n'), { 
         parse_mode: undefined,
         disable_web_page_preview: true
       });
+      
       session.explainerSent = true;
       adminSessions.set(adminId, session);
+    } catch (error) {
+      console.error("Failed to send explainer message:", error);
+      // Try an even simpler message as last resort
+      try {
+        await ctx.reply("Welcome to the Filter Configuration! Use the menu below to manage username filters.");
+        session.explainerSent = true;
+        adminSessions.set(adminId, session);
+      } catch (err) {
+        console.error("Failed to send simplified explainer:", err);
+      }
     }
   }
 }
