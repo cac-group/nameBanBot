@@ -141,10 +141,4 @@ All changes to the banned patterns are automatically saved back to **banned_patt
 - **Pattern Persistence:**  
   If you prefer a different file format or persistent storage mechanism, adjust the `loadBannedPatterns()` and `saveBannedPatterns()` functions accordingly.
 
-## Notes
-
-- This bot uses in-memory storage with file persistence via TOML. In a production environment, consider a more robust storage solution.
-- Ensure you handle potential errors and rate limits appropriately.
-- The instructional explainer message is automatically sent on first contact, and the interactive menu is deleted after the completion of an action to maintain a clean chat interface.
-
 ---
