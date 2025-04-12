@@ -37,15 +37,23 @@ const adminSessions = new Map();
 const newJoinMonitors = {};
 
 /**
+ * Cache of known group admins (user IDs that are admins in whitelisted groups)
+ * This allows group admins to configure the bot in DMs without being in WHITELISTED_USER_IDS
+ */
+const knownGroupAdmins = new Set();
+
+/**
  * Fun ban messages to display when a user is banned
  */
 const banMessages = [
   "Hasta la vista, baby! User {userId} has been terminated.",
   "I'll be back... but user {userId} won't be.",
   "User {userId} has been terminated. Come with me if you want to live.",
-  "Your clothes, your boots, and your CAC access. User {userId} has been terminated.",
+  "Your clothes, your boots, and your Telegram access. User {userId} has been terminated.",
   "User {userId} is now terminated. Judgment Day has come.",
-  "Talk to the hand! User {userId} has been terminated."
+  "I need your username, your bio, and your Telegram account. User {userId} terminated.",
+  "Talk to the hand! User {userId} has been terminated.",
+  "User {userId} has been terminated. Consider that a divorce."
 ];
 
 // Utility Functions
@@ -64,22 +72,69 @@ function isChatAllowed(ctx) {
 }
 
 /**
+ * Check if a user is an admin in any whitelisted group and cache the result
+ */
+async function checkAndCacheGroupAdmin(userId, bot) {
+  // If already in explicit whitelist, no need to check
+  if (WHITELISTED_USER_IDS.includes(userId)) {
+    return true;
+  }
+  
+  // Check each whitelisted group
+  for (const groupId of WHITELISTED_GROUP_IDS) {
+    try {
+      const member = await bot.telegram.getChatMember(groupId, userId);
+      if (member.status === 'administrator' || member.status === 'creator') {
+        // Add to our cache of known admins
+        knownGroupAdmins.add(userId);
+        return true;
+      }
+    } catch (error) {
+      // User might not be in this group, continue to next group
+      continue;
+    }
+  }
+  return false;
+}
+
+/**
  * Returns true if the sender is authorized to configure the bot.
- * In private chats: the sender must have an explicit user id listed.
+ * In private chats: the sender must have an explicit user id listed OR
+ * be an admin in any whitelisted group.
  * In group chats: the group must be whitelisted, and the sender must be a group admin,
  * or their user id is explicitly whitelisted.
  */
 async function isAuthorized(ctx) {
   if (!isChatAllowed(ctx)) return false;
+  const userId = ctx.from.id;
   const chatType = ctx.chat.type;
+  
+  // Check explicit whitelist first for quick response
+  if (WHITELISTED_USER_IDS.includes(userId)) {
+    return true;
+  }
+  
+  // Check if we already know this user is a group admin
+  if (knownGroupAdmins.has(userId)) {
+    return true;
+  }
+  
   if (chatType === 'private') {
-    return WHITELISTED_USER_IDS.includes(ctx.from.id);
+    // In private chat, check if they're an admin in any whitelisted group
+    return await checkAndCacheGroupAdmin(userId, bot);
   } else if (chatType === 'group' || chatType === 'supergroup') {
     try {
-      const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
-      const isGroupAdmin =
+      // In a group chat, check if they're an admin in the current group
+      const member = await ctx.telegram.getChatMember(ctx.chat.id, userId);
+      const isGroupAdmin = 
         member.status === 'administrator' || member.status === 'creator';
-      return isGroupAdmin || WHITELISTED_USER_IDS.includes(ctx.from.id);
+      
+      if (isGroupAdmin) {
+        // Cache this admin for future reference
+        knownGroupAdmins.add(userId);
+        return true;
+      }
+      return false;
     } catch (e) {
       console.error('Error checking group membership:', e);
       return false;
@@ -314,6 +369,27 @@ async function promptForPattern(ctx, actionLabel) {
 // Bot Setup
 
 const bot = new Telegraf(BOT_TOKEN);
+
+// Middleware to update admin cache when receiving messages from groups
+bot.use(async (ctx, next) => {
+  // Only check in whitelisted groups
+  if (ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup') {
+    if (WHITELISTED_GROUP_IDS.includes(ctx.chat.id)) {
+      try {
+        const userId = ctx.from?.id;
+        if (userId && !WHITELISTED_USER_IDS.includes(userId) && !knownGroupAdmins.has(userId)) {
+          // Run check in background to avoid slowing down response
+          checkAndCacheGroupAdmin(userId, bot).catch(err => {
+            console.error('Error checking admin status:', err);
+          });
+        }
+      } catch (error) {
+        console.error('Error in admin cache middleware:', error);
+      }
+    }
+  }
+  return next();
+});
 
 // --- Group Behavior: Ban New Members ---
 bot.on('new_chat_members', async (ctx) => {
