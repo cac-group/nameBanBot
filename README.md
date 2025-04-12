@@ -61,7 +61,7 @@ Or with Yarn:
 yarn start
 ```
 
-## Features & How It Works
+## Use
 
 ### Automatic Ban Enforcement
 
