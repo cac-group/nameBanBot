@@ -133,8 +133,20 @@ function patternToRegex(patternStr) {
   return new RegExp(wildcardRegex, 'i');
 }
 
-function isBanned(username) {
-  return bannedPatterns.some(({ regex }) => regex.test(username));
+function isBanned(username, firstName, lastName) {
+  // Create a display name that combines first and last name
+  const displayName = [firstName, lastName].filter(Boolean).join(' ').toLowerCase();
+  
+  // Check both username and display name
+  return bannedPatterns.some(({ regex }) => {
+    if (username && regex.test(username)) {
+      return true;
+    }
+    if (displayName && regex.test(displayName)) {
+      return true;
+    }
+    return false;
+  });
 }
 
 // Persistence Functions
@@ -233,7 +245,10 @@ function monitorNewUser(chatId, user) {
     try {
       const chatMember = await bot.telegram.getChatMember(chatId, user.id);
       const username = chatMember.user.username?.toLowerCase();
-      if (username && isBanned(username)) {
+      const firstName = chatMember.user.first_name;
+      const lastName = chatMember.user.last_name;
+      
+      if (isBanned(username, firstName, lastName)) {
         const isBan = settings.action === 'ban';
         if (isBan) {
           await bot.telegram.banChatMember(chatId, user.id);
@@ -244,7 +259,10 @@ function monitorNewUser(chatId, user) {
         const message = getRandomMessage(user.id, isBan);
         await bot.telegram.sendMessage(chatId, message);
         
-        console.log(`${isBan ? 'Banned' : 'Kicked'} user after name change: @${username} in chat ${chatId}`);
+        // Log which name matched the pattern
+        const displayName = [firstName, lastName].filter(Boolean).join(' ');
+        console.log(`${isBan ? 'Banned' : 'Kicked'} user after name change: @${username || 'no_username'} (${displayName}) in chat ${chatId}`);
+        
         clearInterval(interval);
         delete newJoinMonitors[key];
         return;
@@ -429,10 +447,18 @@ bot.on('new_chat_members', async (ctx) => {
   
   for (const user of newUsers) {
     const username = user.username?.toLowerCase();
-    console.log(`Checking user: ${user.id} (@${username || 'no_username'})`);
+    const firstName = user.first_name;
+    const lastName = user.last_name;
+    const displayName = [firstName, lastName].filter(Boolean).join(' ');
     
-    if (username && isBanned(username)) {
-      await takePunishmentAction(ctx, user.id, username, chatId);
+    console.log(`Checking user: ${user.id} (@${username || 'no_username'}) Name: ${displayName}`);
+    
+    if (isBanned(username, firstName, lastName)) {
+      // If matched, log which part matched the pattern
+      const matchedName = username ? `@${username}` : displayName;
+      console.log(`Matched banned pattern: ${matchedName}`);
+      
+      await takePunishmentAction(ctx, user.id, matchedName, chatId);
     } else {
       monitorNewUser(chatId, user);
     }
@@ -444,15 +470,19 @@ bot.on('message', async (ctx, next) => {
   if (!isChatAllowed(ctx)) return next();
   
   const username = ctx.from?.username?.toLowerCase();
-  if (username) {
-    console.log(`Processing message from: @${username}`);
-    if (isBanned(username)) {
-      await takePunishmentAction(ctx, ctx.from.id, username, ctx.chat.id);
-    } else {
-      return next();
-    }
+  const firstName = ctx.from?.first_name;
+  const lastName = ctx.from?.last_name;
+  const displayName = [firstName, lastName].filter(Boolean).join(' ');
+  
+  console.log(`Processing message from: ${ctx.from.id} (@${username || 'no_username'}) Name: ${displayName}`);
+  
+  if (isBanned(username, firstName, lastName)) {
+    // Log which name matched the pattern
+    const matchedName = username ? `@${username}` : displayName;
+    console.log(`Matched banned pattern: ${matchedName}`);
+    
+    await takePunishmentAction(ctx, ctx.from.id, matchedName, ctx.chat.id);
   } else {
-    console.log('Message from user without username');
     return next();
   }
 });
