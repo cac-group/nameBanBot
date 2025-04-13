@@ -1,16 +1,25 @@
 {
   "name": "banBaby",
-  "version": "1.0.0",
-  "main": "index.js",
+  "version": "1.2.0",
+  "main": "bot.js",
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "audit": "yarn audit --level moderate",
+    "preversion": "yarn lint && yarn audit"
   },
   "dependencies": {
     "dotenv": "^16.5.0",
     "fs": "^0.0.1-security",
     "telegraf": "^4.16.3",
     "toml": "^3.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.24.0",
+    "eslint": "^9.24.0",
+    "globals": "^16.0.0"
   }
 }

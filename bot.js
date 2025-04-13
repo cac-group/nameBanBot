@@ -78,7 +78,7 @@ async function checkAndCacheGroupAdmin(userId, bot) {
         return true;
       }
     } catch (error) {
-      continue;
+      // Ignore if user not in that group
     }
   }
   return false;
@@ -97,8 +97,7 @@ async function isAuthorized(ctx) {
   } else if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
     try {
       const user = await ctx.getChatMember(userId);
-      const isGroupAdmin = user.status === 'administrator' || user.status === 'creator';
-      
+      const isGroupAdmin = (user.status === 'administrator' || user.status === 'creator');
       if (isGroupAdmin) {
         knownGroupAdmins.add(userId);
         return true;
@@ -118,23 +117,47 @@ function getRandomMessage(userId, isBan = true) {
   return messageArray[randomIndex].replace('{userId}', userId);
 }
 
+/**
+ * Corrected to parse optional flags (like "/pattern/gi") properly.
+ */
 function patternToRegex(patternStr) {
+  // If wrapped in /.../, strip the slashes and parse any trailing flags
   if (patternStr.startsWith('/') && patternStr.endsWith('/') && patternStr.length > 2) {
+    // e.g. patternStr = "/wild.*horn/i"
+    // inner => "wild.*horn/i"
     const inner = patternStr.slice(1, -1);
-    return new RegExp(inner, 'i');
+    // Attempt to split out trailing flags after the final slash
+    // Example: "wild.*horn/i" => patternBody: "wild.*horn", patternFlags: "i"
+    const match = inner.match(/^(.+?)(?:\/([a-zA-Z]*))?$/);
+    if (match) {
+      const patternBody = match[1];
+      // If user provided flags, use them; otherwise default to "i"
+      const patternFlags = match[2] || 'i';
+      return new RegExp(patternBody, patternFlags);
+    } else {
+      // Fallback: no trailing flags recognized, just force 'i'
+      return new RegExp(inner, 'i');
+    }
   }
   
+  // Otherwise handle wildcard patterns or plain text
   if (!patternStr.includes('*') && !patternStr.includes('?')) {
+    // Plain substring match (case-insensitive)
     return new RegExp(patternStr, 'i');
   }
   
+  // Convert wildcards (* => .*, ? => .)
   const escaped = patternStr.replace(/[-\\/^$+?.()|[\]{}]/g, '\\$&');
   const wildcardRegex = escaped.replace(/\*/g, '.*').replace(/\?/g, '.');
   return new RegExp(wildcardRegex, 'i');
 }
 
+/**
+ * Checks if the username or the combined display name (plus a few variations)
+ * matches any banned pattern.
+ */
 function isBanned(username, firstName, lastName) {
-  // Check username if available
+  // 1) Check the username (if present)
   if (username) {
     const cleanUsername = username.toLowerCase();
     for (const pattern of bannedPatterns) {
@@ -145,48 +168,48 @@ function isBanned(username, firstName, lastName) {
     }
   }
   
-  // Check display name (combined first and last)
+  // 2) Check the display name
   const displayName = [firstName, lastName].filter(Boolean).join(' ');
-  if (displayName) {
-    // Check original display name
-    const cleanName = displayName.toLowerCase();
+  if (!displayName) return false;
+  
+  const cleanName = displayName.toLowerCase();
+  // Original name
+  for (const pattern of bannedPatterns) {
+    if (pattern.regex.test(cleanName)) {
+      console.log(`Match found in display name: "${cleanName}" matched pattern: ${pattern.raw}`);
+      return true;
+    }
+  }
+  
+  // Name with quotes removed
+  const noQuotes = cleanName.replace(/["'`]/g, '');
+  if (noQuotes !== cleanName) {
     for (const pattern of bannedPatterns) {
-      if (pattern.regex.test(cleanName)) {
-        console.log(`Match found in display name: "${cleanName}" matched pattern: ${pattern.raw}`);
+      if (pattern.regex.test(noQuotes)) {
+        console.log(`Match found in display name (no quotes): "${noQuotes}" matched pattern: ${pattern.raw}`);
         return true;
       }
     }
-    
-    // Check display name with quotes removed (common evasion)
-    const noQuotes = cleanName.replace(/["'`]/g, '');
-    if (noQuotes !== cleanName) {
-      for (const pattern of bannedPatterns) {
-        if (pattern.regex.test(noQuotes)) {
-          console.log(`Match found in display name (no quotes): "${noQuotes}" matched pattern: ${pattern.raw}`);
-          return true;
-        }
+  }
+  
+  // Name with spaces removed
+  const noSpaces = cleanName.replace(/\s+/g, '');
+  if (noSpaces !== cleanName) {
+    for (const pattern of bannedPatterns) {
+      if (pattern.regex.test(noSpaces)) {
+        console.log(`Match found in display name (no spaces): "${noSpaces}" matched pattern: ${pattern.raw}`);
+        return true;
       }
     }
-    
-    // Check display name with spaces removed (common evasion)
-    const noSpaces = cleanName.replace(/\s+/g, '');
-    if (noSpaces !== cleanName) {
-      for (const pattern of bannedPatterns) {
-        if (pattern.regex.test(noSpaces)) {
-          console.log(`Match found in display name (no spaces): "${noSpaces}" matched pattern: ${pattern.raw}`);
-          return true;
-        }
-      }
-    }
-    
-    // Check name with both spaces and quotes removed
-    const normalized = cleanName.replace(/["'`\s]/g, '');
-    if (normalized !== cleanName && normalized !== noQuotes && normalized !== noSpaces) {
-      for (const pattern of bannedPatterns) {
-        if (pattern.regex.test(normalized)) {
-          console.log(`Match found in normalized name: "${normalized}" matched pattern: ${pattern.raw}`);
-          return true;
-        }
+  }
+  
+  // Name with both quotes and spaces removed
+  const normalized = cleanName.replace(/["'`\s]/g, '');
+  if (normalized !== cleanName && normalized !== noQuotes && normalized !== noSpaces) {
+    for (const pattern of bannedPatterns) {
+      if (pattern.regex.test(normalized)) {
+        console.log(`Match found in normalized name: "${normalized}" matched pattern: ${pattern.raw}`);
+        return true;
       }
     }
   }
@@ -809,32 +832,9 @@ bot.command('listFilters', async (ctx) => {
   return ctx.reply(`Current filter patterns:\n${list}`);
 });
 
-// Graceful shutdown
-const cleanup = (signal) => {
-  console.log(`\nReceived ${signal}. Shutting down gracefully...`);
-  
-  Object.values(newJoinMonitors).forEach(interval => {
-    clearInterval(interval);
-  });
-  
-  bot.stop(signal);
-  
-  setTimeout(() => {
-    console.log('Forcing exit...');
-    process.exit(0);
-  }, 1000);
-};
-
-process.once('SIGINT', () => cleanup('SIGINT'));
-process.once('SIGTERM', () => cleanup('SIGTERM'));
-process.once('SIGUSR2', () => cleanup('SIGUSR2'));
-
 // Start the bot
 async function startBot() {
-  // Load settings first
   await loadSettings();
-  
-  // Then load patterns
   await loadBannedPatterns();
   
   const launchOptions = {
@@ -845,21 +845,30 @@ async function startBot() {
   bot.launch(launchOptions)
     .then(() => {
       console.log('\n==============================');
-      console.log('Ban Bot Started Successfully!');
+      console.log('Bot Started');
       console.log('==============================');
-      
-      console.log('Configuration:');
-      console.log(`Bot Token: ${BOT_TOKEN ? '✓ Set' : '✗ Not set'}`);
-      console.log(`Banned Patterns File: ${BANNED_PATTERNS_FILE}`);
-      console.log(`Whitelisted User IDs (${WHITELISTED_USER_IDS.length}): ${WHITELISTED_USER_IDS.join(', ')}`);
-      console.log(`Whitelisted Group IDs (${WHITELISTED_GROUP_IDS.length}): ${WHITELISTED_GROUP_IDS.join(', ')}`);
       console.log(`Loaded ${bannedPatterns.length} banned patterns`);
       console.log(`Current action: ${settings.action.toUpperCase()}`);
-      console.log('==============================');
-      
       console.log('Bot is running. Press Ctrl+C to stop.');
     })
     .catch(err => console.error('Bot launch error:', err));
 }
 
 startBot();
+
+// Graceful shutdown
+const cleanup = (signal) => {
+  console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+  Object.values(newJoinMonitors).forEach(interval => {
+    clearInterval(interval);
+  });
+  bot.stop(signal);
+  setTimeout(() => {
+    console.log('Forcing exit...');
+    process.exit(0);
+  }, 1000);
+};
+
+process.once('SIGINT', () => cleanup('SIGINT'));
+process.once('SIGTERM', () => cleanup('SIGTERM'));
+process.once('SIGUSR2', () => cleanup('SIGUSR2'));
