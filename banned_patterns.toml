@@ -1,3 +1,8 @@
 patterns = [
-  "CHILD*PORN"
+  "CHILD*PORN",
+  "CAZBIT",
+  "child*p*",
+  "/.*test[^A-Za-z]+filter.*/i",
+  "/.*wild[^A-Za-z]+horn.*/i",
+  "/wild.*horn/i"
 ]
