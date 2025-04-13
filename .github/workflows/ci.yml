@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      - name: Install Dependencies
+        run: yarn install
+      - name: Run ESLint
+        run: yarn lint
+
+  audit:
+    name: Audit Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      - name: Install Dependencies
+        run: yarn install
+      - name: Run Yarn Audit
+        run: yarn audit --level moderate
