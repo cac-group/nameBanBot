@@ -2,7 +2,7 @@
 
 ## Overview
 
-This bot automatically bans users whose usernames match banned patterns. It monitors:
+This bot automatically triggers actions against users whose usernames match banned patterns. It monitors:
 1. New users joining a group
 2. Username changes after joining
 3. Messages sent by users
@@ -21,6 +21,8 @@ This bot automatically bans users whose usernames match banned patterns. It moni
      ```
      BOT_TOKEN=your_bot_token_here
      BANNED_PATTERNS_FILE=banned_patterns.toml
+     DEFAULT_ACTION=ban  # or 'kick'
+     SETTINGS_FILE=settings.json
      ```
    - Edit `config.js` with your user IDs and group IDs
    - Create initial `banned_patterns.toml`
@@ -39,11 +41,9 @@ dotenv.config();
 
 export const BOT_TOKEN = process.env.BOT_TOKEN;
 export const BANNED_PATTERNS_FILE = process.env.BANNED_PATTERNS_FILE || 'banned_patterns.toml';
-
-// User IDs allowed to configure the bot
-export const WHITELISTED_USER_IDS = [1233456, 789101112];
-
-// Group IDs where the bot operates (supergroup IDs need `-100` prefix)
+export const DEFAULT_ACTION = process.env.DEFAULT_ACTION || 'ban';
+export const SETTINGS_FILE = process.env.SETTINGS_FILE || 'settings.json';
+export const WHITELISTED_USER_IDS = [123456789, 987654321];
 export const WHITELISTED_GROUP_IDS = [-1001111111111];
 ```
 
@@ -65,11 +65,11 @@ Supports three matching modes:
 - **Wildcards:** `*` for any sequence, `?` for one character (e.g., `*bad*`)
 - **Regex:** Custom regex patterns (e.g., `/^evil.*$/i`)
 
-### Ban Actions
+### Actions
 
-- Instantly bans users with matching usernames when they join
-- Monitors new users for 30 seconds to catch username changes
-- Bans users with matching usernames when they send messages
+Two configurable actions when a user matches patterns:
+- **Ban:** Permanently bans the user from the group
+- **Kick:** Removes the user but allows them to rejoin
 
 ### User Commands
 
@@ -81,6 +81,7 @@ Available in private chat for authorized users:
 - `/addFilter <pattern>` - Add a filter pattern
 - `/removeFilter <pattern>` - Remove a filter pattern
 - `/listFilters` - Show all active filter patterns
+- `/setaction <ban|kick>` - Change the action for matched usernames
 - `/chatinfo` - Show chat information (works in groups too)
 
 ### Authorization
@@ -92,7 +93,7 @@ Users can configure the bot if they:
 
 ## Troubleshooting
 
-- Use `/chatinfo` to verify group IDs
+- Use `/chatinfo` to verify group IDs and current settings
 - For supergroups, IDs must have `-100` prefix in config.js
 - Bot requires admin privileges with ban permissions
 - Check console logs for detailed operation information

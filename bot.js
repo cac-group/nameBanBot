@@ -8,16 +8,23 @@ import {
   BOT_TOKEN,
   BANNED_PATTERNS_FILE,
   WHITELISTED_USER_IDS,
-  WHITELISTED_GROUP_IDS
+  WHITELISTED_GROUP_IDS,
+  DEFAULT_ACTION,
+  SETTINGS_FILE
 } from './config.js';
 
 dotenv.config();
+
+const bot = new Telegraf(BOT_TOKEN);
 
 // In-memory Data
 let bannedPatterns = [];
 const adminSessions = new Map();
 const newJoinMonitors = {};
 const knownGroupAdmins = new Set();
+let settings = {
+  action: DEFAULT_ACTION // 'ban' or 'kick'
+};
 
 // Ban messages
 const banMessages = [
@@ -29,6 +36,14 @@ const banMessages = [
   "I need your username, your bio, and your Telegram account. User {userId} terminated.",
   "Talk to the hand! User {userId} has been terminated.",
   "User {userId} has been terminated. Consider that a divorce."
+];
+
+// Kick messages
+const kickMessages = [
+  "User {userId} has been kicked out. They can come back, but I'll be watching...",
+  "User {userId} has been escorted out. They can return after they find Jesus.",
+  "I'm giving user {userId} a timeout. Come back after you've thought about what you've done.",
+  "User {userId} needs to rethink their life choices."
 ];
 
 // Utility Functions
@@ -97,9 +112,10 @@ async function isAuthorized(ctx) {
   return false;
 }
 
-function getRandomBanMessage(userId) {
-  const randomIndex = Math.floor(Math.random() * banMessages.length);
-  return banMessages[randomIndex].replace('{userId}', userId);
+function getRandomMessage(userId, isBan = true) {
+  const messageArray = isBan ? banMessages : kickMessages;
+  const randomIndex = Math.floor(Math.random() * messageArray.length);
+  return messageArray[randomIndex].replace('{userId}', userId);
 }
 
 function patternToRegex(patternStr) {
@@ -149,6 +165,64 @@ async function saveBannedPatterns() {
   }
 }
 
+async function loadSettings() {
+  try {
+    const data = await fs.readFile(SETTINGS_FILE, 'utf-8');
+    const loadedSettings = JSON.parse(data);
+    settings = {
+      ...settings,
+      ...loadedSettings
+    };
+    // Validate the action setting
+    if (settings.action !== 'ban' && settings.action !== 'kick') {
+      settings.action = DEFAULT_ACTION;
+    }
+    console.log(`Loaded settings: action=${settings.action}`);
+  } catch (err) {
+    console.log(`No settings file found or error reading. Using defaults: action=${settings.action}`);
+    // Create the settings file if it doesn't exist
+    try {
+      await saveSettings();
+    } catch (saveErr) {
+      console.error(`Failed to create initial settings file:`, saveErr);
+    }
+  }
+}
+
+async function saveSettings() {
+  try {
+    await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+    console.log(`Settings saved: action=${settings.action}`);
+    return true;
+  } catch (err) {
+    console.error(`Error writing to ${SETTINGS_FILE}`, err);
+    return false;
+  }
+}
+
+// Action handlers
+async function takePunishmentAction(ctx, userId, username, chatId) {
+  const isBan = settings.action === 'ban';
+  try {
+    if (isBan) {
+      // Ban the user permanently
+      await ctx.banChatMember(userId);
+    } else {
+      // Kick the user (they can rejoin)
+      await ctx.banChatMember(userId, { until_date: Math.floor(Date.now() / 1000) + 35 });
+    }
+    
+    const message = getRandomMessage(userId, isBan);
+    await ctx.reply(message);
+    
+    console.log(`${isBan ? 'Banned' : 'Kicked'} user: @${username} in chat ${chatId}`);
+    return true;
+  } catch (error) {
+    console.error(`Failed to ${isBan ? 'ban' : 'kick'} @${username}:`, error);
+    return false;
+  }
+}
+
 // User monitoring
 function monitorNewUser(chatId, user) {
   const key = `${chatId}_${user.id}`;
@@ -160,10 +234,17 @@ function monitorNewUser(chatId, user) {
       const chatMember = await bot.telegram.getChatMember(chatId, user.id);
       const username = chatMember.user.username?.toLowerCase();
       if (username && isBanned(username)) {
-        await bot.telegram.banChatMember(chatId, user.id);
-        const banMessage = getRandomBanMessage(user.id);
-        await bot.telegram.sendMessage(chatId, banMessage);
-        console.log(`Banned user after name change: @${username} in chat ${chatId}`);
+        const isBan = settings.action === 'ban';
+        if (isBan) {
+          await bot.telegram.banChatMember(chatId, user.id);
+        } else {
+          await bot.telegram.banChatMember(chatId, user.id, { until_date: Math.floor(Date.now() / 1000) + 35 });
+        }
+        
+        const message = getRandomMessage(user.id, isBan);
+        await bot.telegram.sendMessage(chatId, message);
+        
+        console.log(`${isBan ? 'Banned' : 'Kicked'} user after name change: @${username} in chat ${chatId}`);
         clearInterval(interval);
         delete newJoinMonitors[key];
         return;
@@ -190,7 +271,8 @@ async function showMainMenu(ctx) {
       inline_keyboard: [
         [{ text: 'Add Filter', callback_data: 'menu_addFilter' }],
         [{ text: 'Remove Filter', callback_data: 'menu_removeFilter' }],
-        [{ text: 'List Filters', callback_data: 'menu_listFilters' }]
+        [{ text: 'List Filters', callback_data: 'menu_listFilters' }],
+        [{ text: `Action: ${settings.action === 'ban' ? 'BAN' : 'KICK'}`, callback_data: 'menu_toggleAction' }]
       ]
     }
   };
@@ -202,21 +284,22 @@ async function sendPersistentExplainer(ctx) {
   if (ctx.chat.type !== 'private') return;
   
   try {
-    const plainTextLines = [
+    const htmlLines = [
       "Welcome to the Filter Configuration!",
       "",
       "You can use the menu below or direct commands to manage banned username filters.",
       "Filters can be plain text, include wildcards (* and ?) or be defined as a /regex/ literal.",
       "",
       "Examples:",
-      "- `spam` matches any username containing 'spam'",
-      "- `*bad*` matches any username containing 'bad'",
-      "- `/^bad.*user$/i` matches usernames starting with 'bad' and ending with 'user'",
-      ""
+      "- <code>spam</code> matches any username containing 'spam'",
+      "- <code>*bad*</code> matches any username containing 'bad'",
+      "- <code>/^bad.*user$/i</code> matches usernames starting with 'bad' and ending with 'user'",
+      "",
+      `Current action for matched usernames: <b>${settings.action.toUpperCase()}</b>`
     ];
     
-    await ctx.reply(plainTextLines.join('\n'), { 
-      parse_mode: 'Markdown',
+    await ctx.reply(htmlLines.join('\n'), { 
+      parse_mode: 'HTML',
       disable_web_page_preview: true
     });
   } catch (error) {
@@ -290,9 +373,6 @@ async function promptForPattern(ctx, actionLabel) {
   await showOrEditMenu(ctx, text, {});
 }
 
-// Bot Setup
-const bot = new Telegraf(BOT_TOKEN);
-
 // Debug middleware
 bot.use((ctx, next) => {
   const now = new Date().toISOString();
@@ -352,14 +432,7 @@ bot.on('new_chat_members', async (ctx) => {
     console.log(`Checking user: ${user.id} (@${username || 'no_username'})`);
     
     if (username && isBanned(username)) {
-      try {
-        await ctx.banChatMember(user.id);
-        const banMessage = getRandomBanMessage(user.id);
-        await ctx.reply(banMessage);
-        console.log(`Banned user immediately: @${username} in chat ${chatId}`);
-      } catch (error) {
-        console.error(`Failed to ban @${username}:`, error);
-      }
+      await takePunishmentAction(ctx, user.id, username, chatId);
     } else {
       monitorNewUser(chatId, user);
     }
@@ -374,14 +447,7 @@ bot.on('message', async (ctx, next) => {
   if (username) {
     console.log(`Processing message from: @${username}`);
     if (isBanned(username)) {
-      try {
-        await ctx.banChatMember(ctx.from.id);
-        const banMessage = getRandomBanMessage(ctx.from.id);
-        await ctx.reply(banMessage);
-        console.log(`Banned user (message): @${username} in chat ${ctx.chat.id}`);
-      } catch (error) {
-        console.error(`Failed to ban @${username}:`, error);
-      }
+      await takePunishmentAction(ctx, ctx.from.id, username, ctx.chat.id);
     } else {
       return next();
     }
@@ -403,7 +469,8 @@ bot.command('chatinfo', async (ctx) => {
   reply += `ID: ${chatId}\n`;
   reply += `Type: ${chatType}\n`;
   reply += `Bot can operate here: ${isAllowed ? 'Yes' : 'No'}\n`;
-  reply += `You can configure bot: ${isAuth ? 'Yes' : 'No'}\n\n`;
+  reply += `You can configure bot: ${isAuth ? 'Yes' : 'No'}\n`;
+  reply += `Current action: ${settings.action.toUpperCase()}\n\n`;
   
   if (chatType === 'group' || chatType === 'supergroup') {
     reply += `Whitelisted group IDs: ${WHITELISTED_GROUP_IDS.join(', ')}\n`;
@@ -420,6 +487,30 @@ bot.command('chatinfo', async (ctx) => {
     console.log(`Chat info provided for ${chatId} (${chatType})`);
   } catch (error) {
     console.error('Failed to send chat info:', error);
+  }
+});
+
+// Set action command
+bot.command('setaction', async (ctx) => {
+  if (!(await isAuthorized(ctx))) return;
+  
+  const args = ctx.message.text.split(' ');
+  if (args.length < 2) {
+    return ctx.reply(`Current action: ${settings.action.toUpperCase()}\n\nUsage: /setaction <ban|kick>`);
+  }
+  
+  const action = args[1].toLowerCase();
+  if (action !== 'ban' && action !== 'kick') {
+    return ctx.reply('Invalid action. Use "ban" or "kick".');
+  }
+  
+  settings.action = action;
+  const success = await saveSettings();
+  
+  if (success) {
+    return ctx.reply(`Action updated to: ${action.toUpperCase()}`);
+  } else {
+    return ctx.reply('Failed to save settings. Check logs for details.');
   }
 });
 
@@ -530,13 +621,13 @@ bot.on('callback_query', async (ctx) => {
   await ctx.answerCbQuery();
   
   if (data === 'menu_addFilter') {
-    const text = "Please enter the pattern to add.\n\nExamples:\n- `spam` (matches any username containing 'spam')\n- `*bad*` (wildcards: matches usernames with 'bad')\n- `/^evil.*$/i` (regex: matches usernames starting with 'evil')";
+    const text = "Please enter the pattern to add.\n\nExamples:\n- <code>spam</code> (matches any username containing 'spam')\n- <code>*bad*</code> (wildcards: matches usernames with 'bad')\n- <code>/^evil.*$/i</code> (regex: matches usernames starting with 'evil')";
     
     let session = adminSessions.get(ctx.from.id) || {};
     session.action = 'Add Filter';
     adminSessions.set(ctx.from.id, session);
     
-    await ctx.editMessageText(text, { parse_mode: 'Markdown' });
+    await ctx.editMessageText(text, { parse_mode: 'HTML' });
   } else if (data === 'menu_removeFilter') {
     // If no patterns exist, just say so
     if (bannedPatterns.length === 0) {
@@ -545,13 +636,13 @@ bot.on('callback_query', async (ctx) => {
     }
     
     const text = "Please enter the pattern to remove.\n\nCurrent patterns:\n" + 
-                 bannedPatterns.map(p => `- \`${p.raw}\``).join('\n');
+                 bannedPatterns.map(p => `- <code>${p.raw}</code>`).join('\n');
     
     let session = adminSessions.get(ctx.from.id) || {};
     session.action = 'Remove Filter';
     adminSessions.set(ctx.from.id, session);
     
-    await ctx.editMessageText(text, { parse_mode: 'Markdown' });
+    await ctx.editMessageText(text, { parse_mode: 'HTML' });
   } else if (data === 'menu_listFilters') {
     if (bannedPatterns.length === 0) {
       await ctx.editMessageText("No filter patterns are currently set.", {
@@ -562,9 +653,9 @@ bot.on('callback_query', async (ctx) => {
         }
       });
     } else {
-      const list = bannedPatterns.map(p => `- \`${p.raw}\``).join('\n');
+      const list = bannedPatterns.map(p => `- <code>${p.raw}</code>`).join('\n');
       await ctx.editMessageText(`Current filter patterns:\n${list}`, {
-        parse_mode: 'Markdown',
+        parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
             [{ text: 'Back to Menu', callback_data: 'menu_back' }]
@@ -572,6 +663,16 @@ bot.on('callback_query', async (ctx) => {
         }
       });
     }
+  } else if (data === 'menu_toggleAction') {
+    // Toggle between ban and kick
+    settings.action = settings.action === 'ban' ? 'kick' : 'ban';
+    await saveSettings();
+    
+    // Update menu to show new action
+    await showMainMenu(ctx);
+    
+    // Show a confirmation message
+    await ctx.answerCbQuery(`Action changed to: ${settings.action.toUpperCase()}`);
   } else if (data === 'menu_back') {
     // Go back to main menu
     await showMainMenu(ctx);
@@ -585,7 +686,7 @@ bot.command('addFilter', async (ctx) => {
   
   const parts = ctx.message.text.split(' ');
   if (parts.length < 2) {
-    return ctx.reply('Usage: /addFilter <pattern>\n\nExamples:\n- /addFilter spam\n- /addFilter *bad*\n- /addFilter /^evil.*$/i', { parse_mode: 'Markdown' });
+    return ctx.reply('Usage: /addFilter <pattern>\n\nExamples:\n- /addFilter spam\n- /addFilter *bad*\n- /addFilter /^evil.*$/i');
   }
   
   const pattern = parts.slice(1).join(' ').trim();
@@ -660,7 +761,13 @@ process.once('SIGTERM', () => cleanup('SIGTERM'));
 process.once('SIGUSR2', () => cleanup('SIGUSR2'));
 
 // Start the bot
-loadBannedPatterns().then(() => {
+async function startBot() {
+  // Load settings first
+  await loadSettings();
+  
+  // Then load patterns
+  await loadBannedPatterns();
+  
   const launchOptions = {
     allowedUpdates: ['message', 'callback_query', 'chat_member', 'my_chat_member'],
     timeout: 30
@@ -678,9 +785,12 @@ loadBannedPatterns().then(() => {
       console.log(`Whitelisted User IDs (${WHITELISTED_USER_IDS.length}): ${WHITELISTED_USER_IDS.join(', ')}`);
       console.log(`Whitelisted Group IDs (${WHITELISTED_GROUP_IDS.length}): ${WHITELISTED_GROUP_IDS.join(', ')}`);
       console.log(`Loaded ${bannedPatterns.length} banned patterns`);
+      console.log(`Current action: ${settings.action.toUpperCase()}`);
       console.log('==============================');
       
       console.log('Bot is running. Press Ctrl+C to stop.');
     })
     .catch(err => console.error('Bot launch error:', err));
-});
+}
+
+startBot();
