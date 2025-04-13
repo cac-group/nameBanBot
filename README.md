@@ -2,143 +2,97 @@
 
 ## Overview
 
-This bot automatically bans new users—or users who change their username shortly after joining—if their username matches any banned patterns. Patterns are stored in a TOML configuration file, and the bot token along with other environment settings are loaded from a **.env** file. All configuration parameters (such as whitelisted user IDs and allowed group IDs) are centralized in a separate **config.js** file. In groups, the bot only operates in those that are whitelisted, and it allows configuration of filter rules by group administrators or by users whose IDs are explicitly approved.
+This bot automatically bans users whose usernames match banned patterns. It monitors:
+1. New users joining a group
+2. Username changes after joining
+3. Messages sent by users
 
 ## Installation
 
-1. **Clone the Repository:**
-
+1. **Clone and Install:**
    ```bash
-   git clone https://your-repo-url.git
-   cd your-repo-directory
-   ```
-
-2. **Install Dependencies:**
-
-   Using Yarn:
-   ```bash
+   git clone https://github.com/yourusername/telegram-ban-bot.git
+   cd telegram-ban-bot
    yarn install
    ```
-   Or using npm:
+
+2. **Configure:**
+   - Create `.env` file:
+     ```
+     BOT_TOKEN=your_bot_token_here
+     BANNED_PATTERNS_FILE=banned_patterns.toml
+     ```
+   - Edit `config.js` with your user IDs and group IDs
+   - Create initial `banned_patterns.toml`
+
+3. **Start:**
    ```bash
-   npm install
+   yarn start
    ```
 
-3. **Set up the .env File:**
+## Configuration Files
 
-   Create a **.env** file in the project root with at least:
-   ```ini
-   BOT_TOKEN=your_bot_token_here
-   BANNED_PATTERNS_FILE=banned_patterns.toml
-   ```
+### config.js
+```js
+import dotenv from 'dotenv';
+dotenv.config();
 
-4. **Create or Update the Configuration File:**
+export const BOT_TOKEN = process.env.BOT_TOKEN;
+export const BANNED_PATTERNS_FILE = process.env.BANNED_PATTERNS_FILE || 'banned_patterns.toml';
 
-   The **config.js** file centralizes parameters like bot token reference, the banned patterns file path, the whitelisted user IDs, and the allowed group IDs. An example **config.js** might look like this:
-   ```js
-   // config.js
-   export const BOT_TOKEN = process.env.BOT_TOKEN;
-   export const BANNED_PATTERNS_FILE = process.env.BANNED_PATTERNS_FILE || 'banned_patterns.toml';
-   // User IDs explicitly allowed to configure the filter
-   export const WHITELISTED_USER_IDS = [123456789, 987654321];
-   // Group IDs where the bot is allowed to operate (supergroup IDs are typically negative numbers)
-   export const WHITELISTED_GROUP_IDS = [-1001111111111, -1002222222222];
-   ```
+// User IDs allowed to configure the bot
+export const WHITELISTED_USER_IDS = [1233456, 789101112];
 
-5. **Create the Banned Patterns File:**
-
-   Create a file named **banned_patterns.toml** in the project root. Example content:
-   ```toml
-   patterns = [
-     "spam",
-     "/^bad.*user$/i",
-     "*malicious*"
-   ]
-   ```
-
-6. **Update package.json:**
-
-   Add `"type": "module",` to allow ES modules with the `.js` extension. Also, add a start script:
-   ```json
-   {
-     "type": "module",
-     "scripts": {
-       "start": "node bot.mjs"
-     }
-   }
-   ```
-
-## Running the Bot
-
-Launch the bot using Node.js (with ES modules enabled):
-
-```bash
-node bot.mjs
+// Group IDs where the bot operates (supergroup IDs need `-100` prefix)
+export const WHITELISTED_GROUP_IDS = [-1001111111111];
 ```
 
-Or using Yarn:
-```bash
-yarn start
+### banned_patterns.toml
+```toml
+patterns = [
+  "spam",
+  "/^bad.*user$/i",
+  "*malicious*"
+]
 ```
 
-## Use
+## Features
 
-### Automatic Ban Enforcement
+### Patterns
 
-- **User Join:**  
-  When a user joins a chat, their username is immediately checked. If it matches any banned pattern, the user is banned.
+Supports three matching modes:
+- **Plain text:** Case-insensitive substring match (e.g., `spam`)
+- **Wildcards:** `*` for any sequence, `?` for one character (e.g., `*bad*`)
+- **Regex:** Custom regex patterns (e.g., `/^evil.*$/i`)
 
-- **Monitoring:**  
-  For up to 30 seconds after joining, the bot polls the user every 5 seconds in case the username changes to something that matches a banned pattern.
+### Ban Actions
 
-- **Message Handling:**  
-  Any message sent by a user with a banned username results in an immediate ban.
+- Instantly bans users with matching usernames when they join
+- Monitors new users for 30 seconds to catch username changes
+- Bans users with matching usernames when they send messages
 
-### Pattern Matching Rules
+### User Commands
 
-Banned patterns support three modes:
+Available in private chat for authorized users:
 
-1. **Plain String Match:**  
-   - If a pattern does not include wildcards (`*` or `?`), it performs a case-insensitive substring match.  
-   - **Example:** `spam` matches any username containing "spam".
+- `/start` - Begin configuration and show help
+- `/help` - Show usage information
+- `/menu` - Display the filter management menu
+- `/addFilter <pattern>` - Add a filter pattern
+- `/removeFilter <pattern>` - Remove a filter pattern
+- `/listFilters` - Show all active filter patterns
+- `/chatinfo` - Show chat information (works in groups too)
 
-2. **Wildcard Matching:**  
-   - Use `*` to match any sequence of characters.  
-   - Use `?` to match exactly one character.  
-   - **Example:** `*bad*` matches any username containing "bad", while `b?d` matches "bad" or "bod" but not "baad".
+### Authorization
 
-3. **Regular Expression Matching:**  
-   - Enclose the pattern in forward slashes `/` to provide a custom regular expression.  
-   - **Example:** `/^bad.*user$/i` matches any username starting with "bad" and ending with "user" (case-insensitive).
+Users can configure the bot if they:
+- Are listed in `WHITELISTED_USER_IDS`
+- Are admin in any whitelisted group
+- Are admin in the current group (for group commands)
 
-### Admin Commands & Management
+## Troubleshooting
 
-Authorized users (either by explicit user ID in **config.js** or by being an admin in a whitelisted group) can manage banned patterns through an interactive workflow:
-
-- **Interactive Menu:**  
-  Upon any text message (if no action is pending) in a private chat or allowed group, the bot automatically sends an instructional explainer message (if not already sent) and displays a single interactive menu. From this menu, the admin can:
-  - **Add Filter:** Prompts for a new banned pattern.
-  - **Remove Filter:** Prompts for a pattern to remove.
-  - **List Filters:** Displays the current banned patterns.
-
-  The menu message is updated (or deleted) after an action is completed, ensuring no duplicate messages clutter the chat.
-
-- **Direct Commands (Optional):**  
-  The following commands are also supported:
-  - `/addFilter <pattern>` — Add a banned pattern.
-  - `/removeFilter <pattern>` — Remove a banned pattern.
-  - `/listFilters` — List all banned patterns.
-
-All changes to the banned patterns are automatically saved back to **banned_patterns.toml**, ensuring persistence across bot restarts.
-
-## Customization
-
-- **Configuration Adjustments:**  
-  Update **config.js** to modify:
-  - **User Whitelist:** The list of user IDs explicitly allowed to configure filters.
-  - **Group Whitelist:** The list of group IDs where the bot is permitted to operate.
-  
-- **Pattern Persistence:**  
-  If you prefer a different file format or persistent storage mechanism, adjust the `loadBannedPatterns()` and `saveBannedPatterns()` functions accordingly.
-
----
+- Use `/chatinfo` to verify group IDs
+- For supergroups, IDs must have `-100` prefix in config.js
+- Bot requires admin privileges with ban permissions
+- Check console logs for detailed operation information
