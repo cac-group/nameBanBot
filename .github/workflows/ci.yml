@@ -11,13 +11,17 @@ jobs:
     name: Lint Code
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup Node
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '16'
-      - name: Install Dependencies
+          node-version: '18.x'
+
+      - name: Install dependencies
         run: yarn install
+
       - name: Run ESLint
         run: yarn lint
 
@@ -25,12 +29,16 @@ jobs:
     name: Audit Dependencies
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup Node
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '16'
-      - name: Install Dependencies
+          node-version: '18.x'
+
+      - name: Install dependencies
         run: yarn install
-      - name: Run Yarn Audit
+
+      - name: Run yarn audit
         run: yarn audit --level moderate
