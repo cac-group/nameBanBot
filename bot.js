@@ -269,17 +269,33 @@ async function saveSettings() {
   }
 }
 
-// Action Handlers
+// Action handlers
 async function takePunishmentAction(ctx, userId, username, chatId) {
+  // 1) Delete the offending message if this was triggered by a user message
+  if (ctx.updateType === 'message' && ctx.message?.message_id) {
+    try {
+      await ctx.deleteMessage(ctx.message.message_id);
+      console.log(`Deleted offending message ${ctx.message.message_id} from user ${userId}`);
+    } catch (err) {
+      console.error('Failed to delete offending message:', err);
+    }
+  }
+
+  // 2) Ban or kick as before
   const isBan = settings.action === 'ban';
   try {
     if (isBan) {
+      // Ban the user permanently
       await ctx.banChatMember(userId);
     } else {
+      // Kick the user (they can rejoin after ~35 seconds)
       await ctx.banChatMember(userId, { until_date: Math.floor(Date.now() / 1000) + 35 });
     }
+
+    // 3) Send the randomized “punishment” message
     const message = getRandomMessage(userId, isBan);
     await ctx.reply(message);
+
     console.log(`${isBan ? 'Banned' : 'Kicked'} user: @${username} in chat ${chatId}`);
     return true;
   } catch (error) {
@@ -287,6 +303,7 @@ async function takePunishmentAction(ctx, userId, username, chatId) {
     return false;
   }
 }
+
 
 // User Monitoring
 function monitorNewUser(chatId, user) {
