@@ -331,7 +331,24 @@ function monitorNewUser(chatId, user) {
 }
 
 // --- Admin Menu Functions ---
-// Show the main admin menu (updates an existing menu message if available)
+// Send the general help message (this remains permanent and is not edited)
+async function sendGeneralHelp(ctx) {
+  const helpText =
+    "Bot Help:\n" +
+    "• /addFilter <pattern>  - Add a banned pattern\n" +
+    "• /removeFilter <pattern>  - Remove a banned pattern\n" +
+    "• /listFilters  - List current banned patterns\n" +
+    "• /setaction <ban|kick>  - Set the action for matches\n" +
+    "• /menu  - Open the admin menu\n" +
+    "Send any non-command text to see this help message.";
+  try {
+    await ctx.reply(helpText, { parse_mode: 'HTML' });
+  } catch (err) {
+    console.error("sendGeneralHelp error:", err);
+  }
+}
+
+// Show the inline admin menu (updates existing inline menu message if available)
 async function showMainMenu(ctx) {
   const text =
     `Admin Menu:\n` +
@@ -436,12 +453,27 @@ async function promptForPattern(ctx, actionLabel) {
 
 // --- Admin Command and Callback Handlers ---
 
-// Direct messages in private chat for admin interaction
+// /start and /help now send the general help message (which remains) and then the inline menu.
+bot.command('help', async (ctx) => {
+  if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) return;
+  await sendGeneralHelp(ctx);
+  await showMainMenu(ctx);
+});
+bot.command('start', async (ctx) => {
+  if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) {
+    return ctx.reply('You are not authorized to configure this bot.');
+  }
+  await sendGeneralHelp(ctx);
+  await showMainMenu(ctx);
+});
+
+// Generic text handler: if no pending action and text does not start with '/', show general help.
 bot.on('text', async (ctx, next) => {
   if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) return next();
   const adminId = ctx.from.id;
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
   const input = ctx.message.text.trim();
+  
   if (input.toLowerCase() === '/cancel') {
     session.action = undefined;
     adminSessions.set(adminId, session);
@@ -449,6 +481,7 @@ bot.on('text', async (ctx, next) => {
     await showMainMenu(ctx);
     return;
   }
+  
   if (session.action) {
     if (session.action === 'Add Filter') {
       try {
@@ -478,12 +511,17 @@ bot.on('text', async (ctx, next) => {
     await showMainMenu(ctx);
     return;
   }
+  
   if (!input.startsWith('/')) {
-    await showMainMenu(ctx);
+    // For any arbitrary text, show the general help message (this message remains permanently)
+    await sendGeneralHelp(ctx);
+    return;
   }
+  
+  return next();
 });
 
-// Callback handler for inline buttons in admin menu
+// Callback query handler for inline admin buttons
 bot.on('callback_query', async (ctx) => {
   if (ctx.chat?.type !== 'private' || !(await isAuthorized(ctx))) {
     return ctx.answerCbQuery('Not authorized.');
@@ -499,7 +537,10 @@ bot.on('callback_query', async (ctx) => {
       });
     } else {
       const list = bannedPatterns.map(p => `<code>${p.raw}</code>`).join('\n');
-      await showOrEditMenu(ctx, `Current filters:\n${list}\n\nEnter filter to remove:`, { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: 'Back to Menu', callback_data: 'menu_back' }]] } });
+      await showOrEditMenu(ctx, `Current filters:\n${list}\n\nEnter filter to remove:`, {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [[{ text: 'Back to Menu', callback_data: 'menu_back' }]] }
+      });
       let session = adminSessions.get(ctx.from.id) || {};
       session.action = 'Remove Filter';
       adminSessions.set(ctx.from.id, session);
@@ -526,7 +567,7 @@ bot.on('callback_query', async (ctx) => {
   }
 });
 
-// Direct command handlers for /addFilter, /removeFilter, /listFilters
+// Direct command handlers for /addFilter, /removeFilter, and /listFilters remain unchanged
 bot.command('addFilter', async (ctx) => {
   if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) return;
   const parts = ctx.message.text.split(' ');
