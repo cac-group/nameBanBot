@@ -349,21 +349,28 @@ function monitorNewUser(chatId, user) {
 
 // --- Admin Menu Functions ---
 // Send the general help message (this remains permanent and is not edited)
+
 async function sendGeneralHelp(ctx) {
-  const helpText =
-    "Bot Help:\n" +
-    "• /addFilter <pattern>  - Add a banned pattern\n" +
-    "• /removeFilter <pattern>  - Remove a banned pattern\n" +
-    "• /listFilters  - List current banned patterns\n" +
-    "• /setaction <ban|kick>  - Set the action for matches\n" +
-    "• /menu  - Open the admin menu\n" +
-    "Send any non-command text to see this help message.";
+  const helpText = [
+    'Bot Help:',
+    '• <code>/addFilter &lt;pattern&gt;</code>  - Add a banned pattern',
+    '• <code>/removeFilter &lt;pattern&gt;</code>  - Remove a banned pattern',
+    '• <code>/listFilters</code>  - List current banned patterns',
+    '• <code>/setaction &lt;ban|kick&gt;</code>  - Set the action for matches',
+    '• <code>/menu</code>  - Open the admin menu',
+    'Send any non-command text to see this help message.'
+  ].join('\n');
+
   try {
-    await ctx.reply(helpText, { parse_mode: 'HTML' });
-  } catch (err) {
-    console.error("sendGeneralHelp error:", err);
+    await ctx.reply(helpText, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    });
+  } catch (error) {
+    console.error('sendGeneralHelp error:', error);
   }
 }
+
 
 // Show the inline admin menu (updates existing inline menu message if available)
 async function showMainMenu(ctx) {
@@ -700,17 +707,32 @@ bot.command('start', async (ctx) => {
 
 // Message handler in private chat for admin menu
 bot.on('text', async (ctx, next) => {
-  if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) return next();
+  // Only in private chats and for authorized users
+  if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) {
+    return next();
+  }
+
+  // Delete the user’s message to avoid clutter
+  try {
+    await ctx.deleteMessage(ctx.message.message_id);
+  } catch (err) {
+    console.error('Failed to delete user message:', err);
+  }
+
   const adminId = ctx.from.id;
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
   const input = ctx.message.text.trim();
+
+  // Handle cancel
   if (input.toLowerCase() === '/cancel') {
     session.action = undefined;
     adminSessions.set(adminId, session);
-    await deleteMenu(ctx, "Action cancelled.");
+    await deleteMenu(ctx, 'Action cancelled.');
     await showMainMenu(ctx);
     return;
   }
+
+  // If we're in the middle of Add/Remove Filter flow
   if (session.action) {
     if (session.action === 'Add Filter') {
       try {
@@ -723,8 +745,9 @@ bot.on('text', async (ctx, next) => {
           await ctx.reply(`Filter "${input}" added.`);
         }
       } catch (e) {
-        await ctx.reply(`Invalid pattern.`);
+        await ctx.reply('Invalid pattern.');
       }
+
     } else if (session.action === 'Remove Filter') {
       const index = bannedPatterns.findIndex(p => p.raw === input);
       if (index !== -1) {
@@ -735,15 +758,33 @@ bot.on('text', async (ctx, next) => {
         await ctx.reply(`Pattern "${input}" not found.`);
       }
     }
+
+    // Clear the action and show the menu again
     session.action = undefined;
     adminSessions.set(adminId, session);
     await showMainMenu(ctx);
     return;
   }
-  // If no pending action and the text is not a command, show the menu.
+
+  // No pending action and not a slash command: update the menu
   if (!input.startsWith('/')) {
-    await showMainMenu(ctx);
+    const menuText = 'Filter Management Menu\n\nChoose an action from the buttons below:';
+    const menuKeyboard = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: 'Add Filter', callback_data: 'menu_addFilter' }],
+          [{ text: 'Remove Filter', callback_data: 'menu_removeFilter' }],
+          [{ text: 'List Filters', callback_data: 'menu_listFilters' }],
+          [{ text: `Action: ${settings.action.toUpperCase()}`, callback_data: 'menu_toggleAction' }]
+        ]
+      }
+    };
+    await showOrEditMenu(ctx, menuText, menuKeyboard);
+    return;
   }
+
+  // Otherwise, pass through to other handlers
+  return next();
 });
 
 // Admin cache and debug middleware
