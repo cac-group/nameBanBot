@@ -2,14 +2,16 @@
 
 ## Overview
 
-This bot automatically triggers actions against users whose usernames match banned patterns. It monitors:
+This bot automatically triggers actions against users whose usernames or display names match banned patterns. It monitors:
+
 1. New users joining a group
-2. Username changes after joining
+2. Username/display name changes after joining (monitored for 30 seconds)
 3. Messages sent by users
 
 ## Installation
 
 1. **Clone and Install:**
+
    ```bash
    git clone https://github.com/yourusername/telegram-ban-bot.git
    cd telegram-ban-bot
@@ -18,49 +20,35 @@ This bot automatically triggers actions against users whose usernames match bann
 
 2. **Configure:**
    - Create `.env` file:
-     ```
+
+     ```sh
      BOT_TOKEN=your_bot_token_here
-     BANNED_PATTERNS_FILE=banned_patterns.toml
+     BANNED_PATTERNS_DIR=./banned_patterns
      DEFAULT_ACTION=ban  # or 'kick'
      SETTINGS_FILE=settings.json
      ```
+
    - Edit `config.js` with your user IDs and group IDs
-   - Create initial `banned_patterns.toml`
+   - Create the banned_patterns directory: `mkdir -p ./banned_patterns`
 
 3. **Start:**
+
    ```bash
    yarn start
    ```
 
-## Configuration Files
+## Key Features
 
-### config.js
-```js
-import dotenv from 'dotenv';
-dotenv.config();
+### Group-Specific Pattern Management
 
-export const BOT_TOKEN = process.env.BOT_TOKEN;
-export const BANNED_PATTERNS_FILE = process.env.BANNED_PATTERNS_FILE || 'banned_patterns.toml';
-export const DEFAULT_ACTION = process.env.DEFAULT_ACTION || 'ban';
-export const SETTINGS_FILE = process.env.SETTINGS_FILE || 'settings.json';
-export const WHITELISTED_USER_IDS = [123456789, 987654321];
-export const WHITELISTED_GROUP_IDS = [-1001111111111];
-```
+- Each group now has its own separate set of banned patterns
+- Admins can select which group to configure
+- Changes only affect the selected group
 
-### banned_patterns.toml
-```toml
-patterns = [
-  "spam",
-  "/^bad.*user$/i",
-  "*malicious*"
-]
-```
-
-## Features
-
-### Patterns
+### Pattern Types
 
 Supports three matching modes:
+
 - **Plain text:** Case-insensitive substring match (e.g., `spam`)
 - **Wildcards:** `*` for any sequence, `?` for one character (e.g., `*bad*`)
 - **Regex:** Custom regex patterns (e.g., `/^evil.*$/i`)
@@ -68,6 +56,7 @@ Supports three matching modes:
 ### Actions
 
 Two configurable actions when a user matches patterns:
+
 - **Ban:** Permanently bans the user from the group
 - **Kick:** Removes the user but allows them to rejoin
 
@@ -87,9 +76,19 @@ Available in private chat for authorized users:
 ### Authorization
 
 Users can configure the bot if they:
+
 - Are listed in `WHITELISTED_USER_IDS`
 - Are admin in any whitelisted group
 - Are admin in the current group (for group commands)
+
+## Interactive Admin Menu
+
+The bot provides an interactive menu in private chat that allows admins to:
+
+1. Select which group to configure
+2. View, add, and remove patterns for the selected group
+3. Toggle between ban/kick actions
+4. Check current configuration status
 
 ## Troubleshooting
 
@@ -97,3 +96,4 @@ Users can configure the bot if they:
 - For supergroups, IDs must have `-100` prefix in config.js
 - Bot requires admin privileges with ban permissions
 - Check console logs for detailed operation information
+- Make sure the `banned_patterns` directory exists
