@@ -23,7 +23,7 @@ const adminSessions = new Map();
 const newJoinMonitors = {};
 const knownGroupAdmins = new Set();
 let settings = {
-  action: DEFAULT_ACTION // 'ban' or 'kick'
+  groupActions: {} // stores groupId -> 'ban' or 'kick'
 };
 
 // Ban messages
@@ -275,12 +275,27 @@ async function loadSettings() {
       ...settings,
       ...loadedSettings
     };
-    if (settings.action !== 'ban' && settings.action !== 'kick') {
-      settings.action = DEFAULT_ACTION;
+    
+    // Ensure groupActions exists
+    if (!settings.groupActions) {
+      settings.groupActions = {};
     }
-    console.log(`Loaded settings: action=${settings.action}`);
+    
+    // Migrate from old global action setting if present
+    if (loadedSettings.action && Object.keys(settings.groupActions).length === 0) {
+      // Apply the old global action to all whitelisted groups
+      WHITELISTED_GROUP_IDS.forEach(groupId => {
+        settings.groupActions[groupId] = loadedSettings.action;
+      });
+    }
+    
+    console.log(`Loaded settings:`, settings.groupActions);
   } catch (err) {
-    console.log(`No settings file found or error reading. Using defaults: action=${settings.action}`);
+    console.log(`No settings file found or error reading. Using defaults.`);
+    // Set default action for all whitelisted groups
+    WHITELISTED_GROUP_IDS.forEach(groupId => {
+      settings.groupActions[groupId] = DEFAULT_ACTION;
+    });
     try {
       await saveSettings();
     } catch (saveErr) {
@@ -300,9 +315,16 @@ async function saveSettings() {
   }
 }
 
-// Action Handlers
+// New function to get action for specific group
+function getGroupAction(groupId) {
+  return settings.groupActions[groupId] || DEFAULT_ACTION;
+}
+
+// Violation handling
 async function takePunishmentAction(ctx, userId, username, chatId) {
-  const isBan = settings.action === 'ban';
+  const action = getGroupAction(chatId);
+  const isBan = action === 'ban';
+  
   try {
     if (isBan) {
       await ctx.banChatMember(userId);
@@ -319,7 +341,7 @@ async function takePunishmentAction(ctx, userId, username, chatId) {
   }
 }
 
-// User Monitoring
+// Watches new users for a set period of time for name changes
 function monitorNewUser(chatId, user) {
   const key = `${chatId}_${user.id}`;
   console.log(`Started monitoring new user: ${user.id} in chat ${chatId}`);
@@ -333,8 +355,11 @@ function monitorNewUser(chatId, user) {
       const lastName = chatMember.user.last_name;
       const displayName = [firstName, lastName].filter(Boolean).join(' ');
       console.log(`Checking user ${user.id}: @${username || 'no_username'}, Name: ${displayName}`);
+      
       if (isBanned(username, firstName, lastName, chatId)) {
-        const isBan = settings.action === 'ban';
+        const action = getGroupAction(chatId);
+        const isBan = action === 'ban';
+        
         if (isBan) {
           await bot.telegram.banChatMember(chatId, user.id);
         } else {
@@ -374,17 +399,18 @@ async function showMainMenu(ctx) {
 
   const selectedGroupId = session.selectedGroupId;
   const patterns = groupPatterns.get(selectedGroupId) || [];
+  const groupAction = getGroupAction(selectedGroupId);
 
   const text =
     `Admin Menu:\n` +
     `Selected Group: ${selectedGroupId}\n` +
     `Patterns: ${patterns.length}\n` +
-    `Action: ${settings.action.toUpperCase()}\n\n` +
+    `Action: ${groupAction.toUpperCase()}\n\n` +
     `Use the buttons below to manage filters.`;
 
   // Create group selection buttons
   const groupButtons = WHITELISTED_GROUP_IDS.map(groupId => ({
-    text: `${groupId === selectedGroupId ? '✅ ' : ''}Group ${groupId}`,
+    text: `${groupId === selectedGroupId ? '✅ ' : ''}Group ${groupId} (${getGroupAction(groupId).toUpperCase()})`,
     callback_data: `select_group_${groupId}`
   }));
 
@@ -401,7 +427,7 @@ async function showMainMenu(ctx) {
         [{ text: 'Add Filter', callback_data: 'menu_addFilter' }],
         [{ text: 'Remove Filter', callback_data: 'menu_removeFilter' }],
         [{ text: 'List Filters', callback_data: 'menu_listFilters' }],
-        [{ text: `Toggle: ${settings.action.toUpperCase()}`, callback_data: 'menu_toggleAction' }]
+        [{ text: `Toggle: ${groupAction.toUpperCase()}`, callback_data: 'menu_toggleAction' }]
       ]
     }
   };
@@ -618,10 +644,13 @@ bot.on('callback_query', async (ctx) => {
       });
     }
   } else if (data === 'menu_toggleAction') {
-    settings.action = settings.action === 'ban' ? 'kick' : 'ban';
+    // Toggle action for the selected group only
+    const currentAction = getGroupAction(groupId);
+    const newAction = currentAction === 'ban' ? 'kick' : 'ban';
+    settings.groupActions[groupId] = newAction;
     await saveSettings();
     await showMainMenu(ctx);
-    await ctx.answerCbQuery(`Action now: ${settings.action.toUpperCase()}`);
+    await ctx.answerCbQuery(`Action now: ${newAction.toUpperCase()} for Group ${groupId}`);
   } else if (data === 'menu_back') {
     await showMainMenu(ctx);
   }
@@ -724,7 +753,9 @@ bot.command('chatinfo', async (ctx) => {
   const chatTitle = ctx.chat.title || 'Private Chat';
   const isAllowed = isChatAllowed(ctx);
   const isAuth = await isAuthorized(ctx);
-  let reply = `Chat: "${chatTitle}"\nID: ${chatId}\nType: ${chatType}\nBot allowed: ${isAllowed ? 'Yes' : 'No'}\nCan configure: ${isAuth ? 'Yes' : 'No'}\nCurrent action: ${settings.action.toUpperCase()}\n\n`;
+  const groupAction = getGroupAction(chatId);
+  
+  let reply = `Chat: "${chatTitle}"\nID: ${chatId}\nType: ${chatType}\nBot allowed: ${isAllowed ? 'Yes' : 'No'}\nCan configure: ${isAuth ? 'Yes' : 'No'}\nCurrent action: ${groupAction.toUpperCase()}\n\n`;
 
   if (chatType === 'group' || chatType === 'supergroup') {
     reply += `Whitelisted group IDs: ${WHITELISTED_GROUP_IDS.join(', ')}\nID match: ${WHITELISTED_GROUP_IDS.includes(chatId) ? 'Yes' : 'No'}\n`;
@@ -748,20 +779,74 @@ bot.command('chatinfo', async (ctx) => {
 // Set action command
 bot.command('setaction', async (ctx) => {
   if (!(await isAuthorized(ctx))) return;
+  
   const args = ctx.message.text.split(' ');
-  if (args.length < 2) {
-    return ctx.reply(`Current action: ${settings.action.toUpperCase()}\nUsage: /setaction <ban|kick>`);
-  }
-  const action = args[1].toLowerCase();
-  if (action !== 'ban' && action !== 'kick') {
-    return ctx.reply('Invalid action. Use "ban" or "kick".');
-  }
-  settings.action = action;
-  const success = await saveSettings();
-  if (success) {
-    return ctx.reply(`Action updated to: ${action.toUpperCase()}`);
-  } else {
-    return ctx.reply('Failed to save settings. Check logs for details.');
+  
+  // If in group, check if user is admin of that group
+  if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
+    if (!WHITELISTED_GROUP_IDS.includes(ctx.chat.id)) {
+      return ctx.reply('This command only works in whitelisted groups.');
+    }
+    
+    // Check if user is admin of this specific group
+    try {
+      const user = await ctx.getChatMember(ctx.from.id);
+      if (user.status !== 'administrator' && user.status !== 'creator' && !WHITELISTED_USER_IDS.includes(ctx.from.id)) {
+        return ctx.reply('You must be a group admin to change this setting.');
+      }
+    } catch (e) {
+      return ctx.reply('Error checking admin status.');
+    }
+    
+    const groupId = ctx.chat.id;
+    const currentAction = getGroupAction(groupId);
+    
+    if (args.length < 2) {
+      return ctx.reply(`Current action for this group: ${currentAction.toUpperCase()}\nUsage: /setaction <ban|kick>`);
+    }
+    
+    const action = args[1].toLowerCase();
+    if (action !== 'ban' && action !== 'kick') {
+      return ctx.reply('Invalid action. Use "ban" or "kick".');
+    }
+    
+    settings.groupActions[groupId] = action;
+    const success = await saveSettings();
+    if (success) {
+      return ctx.reply(`Action updated to: ${action.toUpperCase()} for this group`);
+    } else {
+      return ctx.reply('Failed to save settings. Check logs for details.');
+    }
+  } 
+  
+  // If in private chat, use selected group from session
+  else {
+    const adminId = ctx.from.id;
+    let session = adminSessions.get(adminId) || {};
+    const groupId = session.selectedGroupId;
+    
+    if (!groupId) {
+      return ctx.reply('No group selected. Use /menu to select a group first.');
+    }
+    
+    const currentAction = getGroupAction(groupId);
+    
+    if (args.length < 2) {
+      return ctx.reply(`Current action for Group ${groupId}: ${currentAction.toUpperCase()}\nUsage: /setaction <ban|kick>`);
+    }
+    
+    const action = args[1].toLowerCase();
+    if (action !== 'ban' && action !== 'kick') {
+      return ctx.reply('Invalid action. Use "ban" or "kick".');
+    }
+    
+    settings.groupActions[groupId] = action;
+    const success = await saveSettings();
+    if (success) {
+      return ctx.reply(`Action updated to: ${action.toUpperCase()} for Group ${groupId}`);
+    } else {
+      return ctx.reply('Failed to save settings. Check logs for details.');
+    }
   }
 });
 
@@ -904,6 +989,14 @@ async function startup() {
   await loadSettings();
   await loadAllGroupPatterns();
 
+  // Ensure all whitelisted groups have an action setting
+  WHITELISTED_GROUP_IDS.forEach(groupId => {
+    if (!settings.groupActions[groupId]) {
+      settings.groupActions[groupId] = DEFAULT_ACTION;
+    }
+  });
+  await saveSettings();
+
   bot.launch({
     allowedUpdates: ['message', 'callback_query', 'chat_member', 'my_chat_member'],
     timeout: 30
@@ -913,21 +1006,11 @@ async function startup() {
     console.log('Bot Started');
     console.log('==============================');
     console.log(`Loaded patterns for ${groupPatterns.size} groups`);
-    console.log(`Current action: ${settings.action.toUpperCase()}`);
+    console.log(`Group actions:`, settings.groupActions);
     console.log('Bot is running. Press Ctrl+C to stop.');
   })
   .catch(err => console.error('Bot launch error:', err));
 }
-
-const cleanup = (signal) => {
-  console.log(`\nReceived ${signal}. Shutting down gracefully...`);
-  Object.values(newJoinMonitors).forEach(interval => clearInterval(interval));
-  bot.stop(signal);
-  setTimeout(() => {
-    console.log('Forcing exit...');
-    process.exit(0);
-  }, 1000);
-};
 
 process.once('SIGINT', () => cleanup('SIGINT'));
 process.once('SIGTERM', () => cleanup('SIGTERM'));
