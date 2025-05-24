@@ -63,6 +63,7 @@ export function validatePattern(pattern) {
   }
   
   // Remove control characters
+  // eslint-disable-next-line no-control-regex
   const cleaned = pattern.replace(/[\x00-\x1F\x7F]/g, '');
   
   // Check maximum length
@@ -132,13 +133,12 @@ export async function matchesPattern(pattern, testString) {
  * @param {string} patternStr - Raw pattern string
  * @returns {Object} - Object with raw pattern and compiled regex
  */
-export function createPatternObject(patternStr) {
-  const validated = validatePattern(patternStr);
+export function createPatternObject(rawPattern) {
+  const validated = validatePattern(rawPattern);
   const regex = compileSafeRegex(validated);
-  
   return {
     raw: validated,
-    regex: regex
+    regex
   };
 }
 

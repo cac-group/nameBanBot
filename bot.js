@@ -15,7 +15,6 @@ import {
 
 // Import security functions
 import {
-  validatePattern,
   createPatternObject,
   matchesPattern
 } from './security.js';
@@ -118,7 +117,7 @@ async function checkAndCacheGroupAdmin(userId, bot) {
         console.log(`[ADMIN_CHECK] User ${userId} is admin in group ${groupId} - cached`);
         return true;
       }
-    } catch (error) {
+    } catch {
       console.log(`[ADMIN_CHECK] User ${userId} not found in group ${groupId}`);
     }
   }
@@ -127,43 +126,40 @@ async function checkAndCacheGroupAdmin(userId, bot) {
   return false;
 }
 
-// Updated authorization function with proper group-specific logic
-async function isAuthorized(ctx, requiredGroupId = null) {
-  console.log(`[AUTH] Checking authorization for user ${ctx.from.id} in ${ctx.chat.type} chat`);
-  
+// auth check
+async function isAuthorized(ctx) {
+  const userId = ctx.from.id;
+  const chatType = ctx.chat.type;
+
+  console.log(`[AUTH] Checking authorization for user ${userId} in ${chatType} chat`);
+
+  // allow only whitelisted groups
   if (!isChatAllowed(ctx)) {
     console.log(`[AUTH] Chat not allowed - denied`);
     return false;
   }
-  
-  const userId = ctx.from.id;
-  
-  // Global whitelist users can configure any group
+
+  // whitelisted - global admin level access
   if (WHITELISTED_USER_IDS.includes(userId)) {
     console.log(`[AUTH] User ${userId} authorized via global whitelist`);
     return true;
   }
-  
-  // If in a group chat, check if user is admin of that specific group
-  if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
+
+  // group admin - admin of whitelisted group
+  if (chatType === 'group' || chatType === 'supergroup') {
     const groupId = ctx.chat.id;
-    
-    // Only allow configuration for whitelisted groups
     if (!WHITELISTED_GROUP_IDS.includes(groupId)) {
       console.log(`[AUTH] Group ${groupId} not whitelisted - denied`);
       return false;
     }
-    
     try {
       const user = await ctx.getChatMember(userId);
-      const isGroupAdmin = (user.status === 'administrator' || user.status === 'creator');
-      if (isGroupAdmin) {
-        console.log(`[AUTH] User ${userId} is admin in group ${groupId} - authorized for this group only`);
-        // Store which group they can manage in their session
+      if (user.status === 'administrator' || user.status === 'creator') {
         let session = adminSessions.get(userId) || { chatId: ctx.chat.id };
         session.authorizedGroupId = groupId;
         session.isGlobalAdmin = false;
         adminSessions.set(userId, session);
+        console.log(`[AUTH] User ${userId} is admin in group ${groupId} - authorized`);
         return true;
       }
     } catch (e) {
@@ -171,28 +167,28 @@ async function isAuthorized(ctx, requiredGroupId = null) {
       return false;
     }
   }
-  
-  // For private chat, check if they're admin in any whitelisted group
-  if (ctx.chat.type === 'private') {
+
+  // allow dm interaction only from approved
+  if (chatType === 'private') {
     for (const groupId of WHITELISTED_GROUP_IDS) {
       try {
         const user = await bot.telegram.getChatMember(groupId, userId);
         if (user.status === 'administrator' || user.status === 'creator') {
-          console.log(`[AUTH] User ${userId} is admin in group ${groupId} - authorized for private chat`);
-          // Store which group they can manage
           let session = adminSessions.get(userId) || { chatId: ctx.chat.id };
           session.authorizedGroupId = groupId;
           session.isGlobalAdmin = false;
-          session.selectedGroupId = groupId; // Auto-select their group
+          session.selectedGroupId = groupId;
           adminSessions.set(userId, session);
+          console.log(`[AUTH] User ${userId} is admin in group ${groupId} - authorized for DM`);
           return true;
         }
-      } catch (error) {
-        console.log(`[AUTH] User ${userId} not found in group ${groupId}`);
+      } catch {
+        // Not admin in this group
       }
     }
   }
-  
+
+  // deny all other users
   console.log(`[AUTH] Authorization denied for user ${userId}`);
   return false;
 }
@@ -361,7 +357,7 @@ async function loadSettings() {
     };
     
     console.log(`[SETTINGS] Loaded existing settings:`, settings);
-  } catch (err) {
+  } catch {
     console.log(`[SETTINGS] No settings file found or error reading - creating new settings`);
     settings = {
       groupActions: {}
@@ -994,8 +990,8 @@ bot.on('text', async (ctx, next) => {
 
     if (session.action === 'Add Filter') {
       console.log(`[ADMIN_TEXT] Adding filter for group ${groupId}: "${input}"`);
-      try {
-        const patternObj = createPatternObject(input);
+        try {
+          const patternObj = createPatternObject(input);
         
         if (patterns.some(p => p.raw === patternObj.raw)) {
           console.log(`[ADMIN_TEXT] Pattern already exists: "${patternObj.raw}"`);
@@ -1010,10 +1006,10 @@ bot.on('text', async (ctx, next) => {
           console.log(`[ADMIN_TEXT] ✅ Added pattern "${patternObj.raw}" to group ${groupId}`);
           await ctx.reply(`Filter "${patternObj.raw}" added to Group ${groupId}.`);
         }
-      } catch (e) {
-        console.log(`[ADMIN_TEXT] ❌ Invalid pattern: ${e.message}`);
-        await ctx.reply(`Invalid pattern: ${e.message}`);
-      }
+          } catch (e) {
+            await ctx.reply(`Invalid pattern: ${e.message}`);
+            return;
+          }
     } else if (session.action === 'Remove Filter') {
       console.log(`[ADMIN_TEXT] Removing filter for group ${groupId}: "${input}"`);
       const index = patterns.findIndex(p => p.raw === input);
@@ -1566,19 +1562,22 @@ bot.command('hits', async (ctx) => {
   const isPrivate = ctx.chat.type === 'private';
   const isAdmin = isPrivate && await isAuthorized(ctx);
   const args = ctx.message.text.split(' ').slice(1);
-  let reply = '';
+
+  // Only allow in whitelisted groups or admin DMs
+  if (!isPrivate && !WHITELISTED_GROUP_IDS.includes(ctx.chat.id)) {
+    return ctx.reply('This group is not authorized for stats.');
+  }
 
   // Pattern-specific (admin/DM only)
   if (isAdmin && args.length > 0) {
     const patternRaw = args.join(' ').trim();
     const stats = getHitStatsForPattern(patternRaw);
     if (stats.length === 0) {
-      reply = `No recorded hits for pattern:\n<code>${patternRaw}</code>`;
-    } else {
-      reply = `📊 Hit counts for pattern <code>${patternRaw}</code>:\n`;
-      for (const { groupId, count } of stats) {
-        reply += `• Group <b>${groupId}</b>: <b>${count}</b> hit(s)\n`;
-      }
+      return ctx.reply(`No recorded hits for pattern:\n<code>${patternRaw}</code>`, { parse_mode: 'HTML' });
+    }
+    let reply = `📊 Hit counts for pattern <code>${patternRaw}</code>:\n`;
+    for (const { groupId, count } of stats) {
+      reply += `• Group <b>${groupId}</b>: <b>${count}</b> hit(s)\n`;
     }
     return ctx.reply(reply, { parse_mode: 'HTML' });
   }
@@ -1586,16 +1585,16 @@ bot.command('hits', async (ctx) => {
   // Group stats (group or DM)
   const groupId = isPrivate ? (adminSessions.get(ctx.from.id)?.selectedGroupId) : ctx.chat.id;
   if (!groupId || !hitCounters[groupId] || Object.keys(hitCounters[groupId]).length === 0) {
-    reply = `No pattern hits recorded for this group yet.`;
-  } else {
-    const stats = getHitStatsForGroup(groupId, 10);
-    reply = `📈 <b>Top Pattern Hits in Group ${groupId}</b>:\n`;
-    for (const { pattern, count } of stats) {
-      reply += `• <code>${pattern}</code>: <b>${count}</b>\n`;
-    }
-    const total = Object.values(hitCounters[groupId]).reduce((a, b) => a + b, 0);
-    reply += `\n<b>Total matches:</b> ${total}`;
+    return ctx.reply(`No pattern hits recorded for this group yet.`);
   }
+  const stats = getHitStatsForGroup(groupId, 10);
+  let reply = `📈 <b>Top Pattern Hits in Group ${groupId}</b>:\n`;
+  for (const { pattern, count } of stats) {
+    reply += `• <code>${pattern}</code>: <b>${count}</b>\n`;
+  }
+  const total = Object.values(hitCounters[groupId]).reduce((a, b) => a + b, 0);
+  reply += `\n<b>Total matches:</b> ${total}`;
+
   return ctx.reply(reply, { parse_mode: 'HTML' });
 });
 
