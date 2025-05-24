@@ -1,17 +1,19 @@
-// bot.js
+// bot.js - Fixed imports
 
 import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
 import toml from 'toml';
+
+// Import configuration constants
 import {
   BOT_TOKEN,
   BANNED_PATTERNS_DIR,
   WHITELISTED_USER_IDS,
   WHITELISTED_GROUP_IDS,
-  DEFAULT_ACTION,
-  SETTINGS_FILE
-} from './config/config.js';
+  SETTINGS_FILE,
+  HIT_COUNTER_FILE
+} from './config.js';
 
 // Import security functions
 import {
@@ -28,8 +30,10 @@ const groupPatterns = new Map(); // Map of groupId -> patterns array
 const adminSessions = new Map();
 const newJoinMonitors = {};
 const knownGroupAdmins = new Set();
+
+// Settings will be loaded from SETTINGS_FILE at startup
 let settings = {
-  groupActions: {} // Per-group actions
+  groupActions: {} // Per-group actions (loaded from settings.json)
 };
 
 // Ban messages
@@ -51,8 +55,6 @@ const kickMessages = [
   "I'm giving user {userId} a timeout. Come back after you've thought about what you've done.",
   "User {userId} needs to rethink their life choices."
 ];
-
-const HIT_COUNTER_FILE = './data/hit_counters.json'; // hit metrics, by group or pattern
 
 let hitCounters = {}; // Structure: { groupId: { pattern: count, ... }, ... }
 
@@ -96,7 +98,7 @@ function getRandomMessage(userId, isBan = true) {
 }
 
 function getGroupAction(groupId) {
-  const action = settings.groupActions[groupId] || DEFAULT_ACTION;
+  const action = settings.groupActions[groupId] || 'kick';
   console.log(`[ACTION] Group ${groupId} action: ${action.toUpperCase()}`);
   return action;
 }
@@ -368,9 +370,9 @@ async function loadSettings() {
   let settingsChanged = false;
   WHITELISTED_GROUP_IDS.forEach(groupId => {
     if (!settings.groupActions[groupId]) {
-      settings.groupActions[groupId] = DEFAULT_ACTION;
+      settings.groupActions[groupId] = 'kick';
       settingsChanged = true;
-      console.log(`[SETTINGS] Created default action for group ${groupId}: ${DEFAULT_ACTION}`);
+      console.log(`[SETTINGS] Created default action for group ${groupId}: ${'kick'}`);
     }
   });
   
@@ -1777,8 +1779,8 @@ async function startup() {
   // Ensure all whitelisted groups have an action setting
   WHITELISTED_GROUP_IDS.forEach(groupId => {
     if (!settings.groupActions[groupId]) {
-      settings.groupActions[groupId] = DEFAULT_ACTION;
-      console.log(`[STARTUP] Set default action for group ${groupId}: ${DEFAULT_ACTION}`);
+      settings.groupActions[groupId] = 'kick';
+      console.log(`[STARTUP] Set default action for group ${groupId}: ${'kick'}`);
     }
   });
   await saveSettings();

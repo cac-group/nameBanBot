@@ -46,7 +46,7 @@ log "Installing dependencies..."
 yarn install
 
 # Restart the service
-log "Restarting the bot service..."
+log "Restarting the bot service...
 systemctl restart "$SERVICE_NAME"
 
 log "Update completed successfully"

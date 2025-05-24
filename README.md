@@ -23,27 +23,32 @@ yarn install
 ## Configuration
 
 1. **Environment file** - Copy and configure:
+
    ```bash
    cp example.env .env
    ```
 
 2. **Bot token** - Add your Telegram bot token to `.env`:
+
    ```bash
    BOT_TOKEN=your_bot_token_here
    ```
 
 3. **Configuration file** - Copy and configure:
+
    ```bash
    cp config.example.js config.js
    ```
 
 4. **User/Group IDs** - Edit `config.js`:
+
    ```javascript
    export const WHITELISTED_USER_IDS = [123456789]; // Global admins
    export const WHITELISTED_GROUP_IDS = [-1001234567890]; // Monitored groups
    ```
 
 5. **Create directories**:
+
    ```bash
    mkdir -p config data/banned_patterns
    ```
@@ -57,6 +62,7 @@ yarn start
 ## Commands
 
 ### Private Chat (Authorized Users)
+
 - `/start` - Initialize bot and show welcome
 - `/menu` - Interactive configuration interface
 - `/addFilter <pattern>` - Add pattern to selected group
@@ -68,6 +74,7 @@ yarn start
 - `/help` - Command reference
 
 ### Any Chat
+
 - `/chatinfo` - Display chat ID and configuration status
 
 ## Pattern Formats
@@ -92,7 +99,7 @@ yarn start
 
 ## File Structure
 
-```
+```sh
 .
 ├── bot.js              # Main bot logic
 ├── security.js         # Pattern validation and matching
@@ -117,6 +124,7 @@ yarn start
 ## Monitoring Triggers
 
 The bot checks users when they:
+
 1. Join a group (immediate check)
 2. Change username/display name (monitored for 30 seconds)
 3. Send messages (ongoing check)
@@ -124,7 +132,9 @@ The bot checks users when they:
 ## Pattern Management
 
 ### Interactive Menu
+
 Access via `/menu` in private chat:
+
 - Select target group
 - Add/remove patterns
 - Toggle ban/kick actions
@@ -132,7 +142,9 @@ Access via `/menu` in private chat:
 - Copy patterns between groups
 
 ### Direct Commands
+
 Use specific commands for scripting or quick changes:
+
 ```bash
 /addFilter *scam*
 /setaction kick
@@ -148,13 +160,17 @@ yarn test
 ## Deployment
 
 ### Environment Variables
+
 Optional environment variable overrides:
+
 - `BOT_TOKEN` - Telegram bot token (required)
 - `BANNED_PATTERNS_DIR` - Pattern storage directory (default: `./data/banned_patterns`)
 - `SETTINGS_FILE` - Settings file path (default: `./config/settings.json`)
 
 ### Systemd Service
+
 Example service file:
+
 ```ini
 [Unit]
 Description=Telegram Ban Bot
@@ -183,11 +199,13 @@ WantedBy=multi-user.target
 ## Updates
 
 Use the included update script for production deployments:
+
 ```bash
 ./update.sh
 ```
 
 Script performs:
+
 - Git pull from main branch
 - Dependency updates
 - Service restart
