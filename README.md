@@ -1,99 +1,194 @@
 # Telegram Ban Bot
 
-## Overview
+Automated user filtering bot for Telegram groups that monitors usernames and display names against configurable patterns.
 
-This bot automatically triggers actions against users whose usernames or display names match banned patterns. It monitors:
+## Features
 
-1. New users joining a group
-2. Username/display name changes after joining (monitored for 30 seconds)
-3. Messages sent by users
+- **Group-specific pattern management** - Each group maintains separate filter lists
+- **Real-time monitoring** - Checks users on join, name changes (30s window), and messages
+- **Pattern types** - Text, wildcards (`*`, `?`), and regex patterns
+- **Flexible actions** - Ban (permanent) or kick (temporary) per group
+- **Hit tracking** - Statistics on pattern matches
+- **Admin interface** - DM menu system for pattern management
+- **Pattern sharing** - Browse and copy patterns between groups
 
 ## Installation
 
-1. **Clone and Install:**
+```bash
+git clone <repository-url>
+cd telegram-ban-bot
+yarn install
+```
 
+## Configuration
+
+1. **Environment file** - Copy and configure:
    ```bash
-   git clone https://github.com/yourusername/telegram-ban-bot.git
-   cd telegram-ban-bot
-   yarn install
+   cp example.env .env
    ```
 
-2. **Configure:**
-   - Create `.env` file:
-
-     ```sh
-     BOT_TOKEN=your_bot_token_here
-     BANNED_PATTERNS_DIR=./banned_patterns
-     DEFAULT_ACTION=ban  # or 'kick'
-     SETTINGS_FILE=settings.json
-     ```
-
-   - Edit `config.js` with your user IDs and group IDs
-   - Create the banned_patterns directory: `mkdir -p ./banned_patterns`
-
-3. **Start:**
-
+2. **Bot token** - Add your Telegram bot token to `.env`:
    ```bash
-   yarn start
+   BOT_TOKEN=your_bot_token_here
    ```
 
-## Key Features
+3. **Configuration file** - Copy and configure:
+   ```bash
+   cp config.example.js config.js
+   ```
 
-### Group-Specific Pattern Management
+4. **User/Group IDs** - Edit `config.js`:
+   ```javascript
+   export const WHITELISTED_USER_IDS = [123456789]; // Global admins
+   export const WHITELISTED_GROUP_IDS = [-1001234567890]; // Monitored groups
+   ```
 
-- Each group now has its own separate set of banned patterns
-- Admins can select which group to configure
-- Changes only affect the selected group
+5. **Create directories**:
+   ```bash
+   mkdir -p config data/banned_patterns
+   ```
 
-### Pattern Types
+## Usage
 
-Supports three matching modes:
+```bash
+yarn start
+```
 
-- **Plain text:** Case-insensitive substring match (e.g., `spam`)
-- **Wildcards:** `*` for any sequence, `?` for one character (e.g., `*bad*`)
-- **Regex:** Custom regex patterns (e.g., `/^evil.*$/i`)
+## Commands
 
-### Actions
+### Private Chat (Authorized Users)
+- `/start` - Initialize bot and show welcome
+- `/menu` - Interactive configuration interface
+- `/addFilter <pattern>` - Add pattern to selected group
+- `/removeFilter <pattern>` - Remove pattern from selected group
+- `/listFilters` - Show all patterns for selected group
+- `/setaction <ban|kick>` - Set action for selected group
+- `/testpattern <pattern> <text>` - Test pattern matching
+- `/hits [pattern]` - Show hit statistics
+- `/help` - Command reference
 
-Two configurable actions when a user matches patterns:
+### Any Chat
+- `/chatinfo` - Display chat ID and configuration status
 
-- **Ban:** Permanently bans the user from the group
-- **Kick:** Removes the user but allows them to rejoin
+## Pattern Formats
 
-### User Commands
+| Type | Format | Example | Matches |
+|------|--------|---------|---------|
+| Text | `pattern` | `spam` | "SPAM", "spammer", "123spam" |
+| Wildcard | `*pattern*` | `*bot*` | "testbot", "bot_user", "mybot123" |
+| Wildcard | `pattern*` | `evil*` | "evil", "eviluser", "evil123" |
+| Wildcard | `test?` | `test?` | "test1", "testa", "tests" |
+| Regex | `/pattern/flags` | `/^bad.*$/i` | Lines starting with "bad" (case-insensitive) |
 
-Available in private chat for authorized users:
+## Authorization Levels
 
-- `/start` - Begin configuration and show help
-- `/help` - Show usage information
-- `/menu` - Display the filter management menu
-- `/addFilter <pattern>` - Add a filter pattern
-- `/removeFilter <pattern>` - Remove a filter pattern
-- `/listFilters` - Show all active filter patterns
-- `/setaction <ban|kick>` - Change the action for matched usernames
-- `/chatinfo` - Show chat information (works in groups too)
+1. **Global Admins** - Users in `WHITELISTED_USER_IDS`
+   - Manage all whitelisted groups
+   - Full configuration access
 
-### Authorization
+2. **Group Admins** - Telegram group administrators
+   - Manage only their own groups
+   - Group must be in `WHITELISTED_GROUP_IDS`
 
-Users can configure the bot if they:
+## File Structure
 
-- Are listed in `WHITELISTED_USER_IDS`
-- Are admin in any whitelisted group
-- Are admin in the current group (for group commands)
+```
+.
+├── bot.js              # Main bot logic
+├── security.js         # Pattern validation and matching
+├── config.js           # User/group configuration and paths
+├── config/
+│   ├── settings.json   # Runtime settings (auto-generated)
+│   └── hit_counters.json   # Statistics (auto-generated)
+├── data/
+│   └── banned_patterns/    # Pattern storage (auto-generated)
+│       └── patterns_<groupId>.toml
+└── tests/              # Test suite
+```
 
-## Interactive Admin Menu
+## Security Features
 
-The bot provides an interactive menu in private chat that allows admins to:
+- Pattern validation with length limits (500 chars)
+- Regex timeout protection (100ms)
+- Control character filtering
+- Dangerous regex detection
+- Safe compilation with error handling
 
-1. Select which group to configure
-2. View, add, and remove patterns for the selected group
-3. Toggle between ban/kick actions
-4. Check current configuration status
+## Monitoring Triggers
+
+The bot checks users when they:
+1. Join a group (immediate check)
+2. Change username/display name (monitored for 30 seconds)
+3. Send messages (ongoing check)
+
+## Pattern Management
+
+### Interactive Menu
+Access via `/menu` in private chat:
+- Select target group
+- Add/remove patterns
+- Toggle ban/kick actions
+- Browse patterns from other groups
+- Copy patterns between groups
+
+### Direct Commands
+Use specific commands for scripting or quick changes:
+```bash
+/addFilter *scam*
+/setaction kick
+/listFilters
+```
+
+## Testing
+
+```bash
+yarn test
+```
+
+## Deployment
+
+### Environment Variables
+Optional environment variable overrides:
+- `BOT_TOKEN` - Telegram bot token (required)
+- `BANNED_PATTERNS_DIR` - Pattern storage directory (default: `./data/banned_patterns`)
+- `SETTINGS_FILE` - Settings file path (default: `./config/settings.json`)
+
+### Systemd Service
+Example service file:
+```ini
+[Unit]
+Description=Telegram Ban Bot
+After=network.target
+
+[Service]
+Type=simple
+User=telegram
+WorkingDirectory=/path/to/bot
+ExecStart=/usr/bin/node bot.js
+Restart=always
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ## Troubleshooting
 
-- Use `/chatinfo` to verify group IDs and current settings
-- For supergroups, IDs must have `-100` prefix in config.js
-- Bot requires admin privileges with ban permissions
-- Check console logs for detailed operation information
-- Make sure the `banned_patterns` directory exists
+- **Group ID verification** - Use `/chatinfo` to confirm group IDs
+- **Supergroup IDs** - Must include `-100` prefix in config
+- **Bot permissions** - Requires admin privileges with ban permissions
+- **Pattern testing** - Use `/testpattern` to verify regex/wildcard behavior
+- **Logs** - Console output shows detailed operation information
+
+## Updates
+
+Use the included update script for production deployments:
+```bash
+./update.sh
+```
+
+Script performs:
+- Git pull from main branch
+- Dependency updates
+- Service restart
+- Preserves local configuration
