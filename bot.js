@@ -13,7 +13,7 @@ import {
   WHITELISTED_GROUP_IDS,
   SETTINGS_FILE,
   HIT_COUNTER_FILE
-} from './config.js';
+} from './config/config.js';
 
 // Import security functions
 import {
