@@ -11,7 +11,7 @@ import {
   WHITELISTED_GROUP_IDS,
   DEFAULT_ACTION,
   SETTINGS_FILE
-} from './config.js';
+} from './config/config.js';
 
 // Import security functions
 import {
@@ -53,6 +53,11 @@ const kickMessages = [
   "User {userId} needs to rethink their life choices."
 ];
 
+const HIT_COUNTER_FILE = './data/hit_counters.json'; // hit metrics, by group or pattern
+
+let hitCounters = {}; // Structure: { groupId: { pattern: count, ... }, ... }
+
+
 // Utility Functions
 function isChatAllowed(ctx) {
   const chatType = ctx.chat?.type;
@@ -63,6 +68,24 @@ function isChatAllowed(ctx) {
   }
   console.log(`[CHAT_CHECK] Non-group chat (${chatType}) - Always allowed`);
   return true;
+}
+
+function canManageGroup(userId, groupId) {
+  // Global admins can manage any group
+  if (WHITELISTED_USER_IDS.includes(userId)) {
+    console.log(`[AUTH] User ${userId} can manage group ${groupId} - global admin`);
+    return true;
+  }
+  
+  // Check session for group-specific authorization
+  const session = adminSessions.get(userId);
+  if (session && session.authorizedGroupId === groupId) {
+    console.log(`[AUTH] User ${userId} can manage group ${groupId} - group admin`);
+    return true;
+  }
+  
+  console.log(`[AUTH] User ${userId} cannot manage group ${groupId}`);
+  return false;
 }
 
 function getRandomMessage(userId, isBan = true) {
@@ -104,7 +127,8 @@ async function checkAndCacheGroupAdmin(userId, bot) {
   return false;
 }
 
-async function isAuthorized(ctx) {
+// Updated authorization function with proper group-specific logic
+async function isAuthorized(ctx, requiredGroupId = null) {
   console.log(`[AUTH] Checking authorization for user ${ctx.from.id} in ${ctx.chat.type} chat`);
   
   if (!isChatAllowed(ctx)) {
@@ -113,29 +137,59 @@ async function isAuthorized(ctx) {
   }
   
   const userId = ctx.from.id;
-  if (WHITELISTED_USER_IDS.includes(userId) || knownGroupAdmins.has(userId)) {
-    console.log(`[AUTH] User ${userId} authorized via whitelist/cache`);
+  
+  // Global whitelist users can configure any group
+  if (WHITELISTED_USER_IDS.includes(userId)) {
+    console.log(`[AUTH] User ${userId} authorized via global whitelist`);
     return true;
   }
   
-  if (ctx.chat.type === 'private') {
-    const result = await checkAndCacheGroupAdmin(userId, bot);
-    console.log(`[AUTH] Private chat admin check result: ${result}`);
-    return result;
-  } else if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
+  // If in a group chat, check if user is admin of that specific group
+  if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
+    const groupId = ctx.chat.id;
+    
+    // Only allow configuration for whitelisted groups
+    if (!WHITELISTED_GROUP_IDS.includes(groupId)) {
+      console.log(`[AUTH] Group ${groupId} not whitelisted - denied`);
+      return false;
+    }
+    
     try {
       const user = await ctx.getChatMember(userId);
       const isGroupAdmin = (user.status === 'administrator' || user.status === 'creator');
       if (isGroupAdmin) {
-        knownGroupAdmins.add(userId);
-        console.log(`[AUTH] User ${userId} is admin in group ${ctx.chat.id} - authorized`);
+        console.log(`[AUTH] User ${userId} is admin in group ${groupId} - authorized for this group only`);
+        // Store which group they can manage in their session
+        let session = adminSessions.get(userId) || { chatId: ctx.chat.id };
+        session.authorizedGroupId = groupId;
+        session.isGlobalAdmin = false;
+        adminSessions.set(userId, session);
         return true;
       }
-      console.log(`[AUTH] User ${userId} is not admin in group ${ctx.chat.id} - denied`);
-      return false;
     } catch (e) {
       console.error(`[AUTH] Error checking group membership: ${e.message}`);
       return false;
+    }
+  }
+  
+  // For private chat, check if they're admin in any whitelisted group
+  if (ctx.chat.type === 'private') {
+    for (const groupId of WHITELISTED_GROUP_IDS) {
+      try {
+        const user = await bot.telegram.getChatMember(groupId, userId);
+        if (user.status === 'administrator' || user.status === 'creator') {
+          console.log(`[AUTH] User ${userId} is admin in group ${groupId} - authorized for private chat`);
+          // Store which group they can manage
+          let session = adminSessions.get(userId) || { chatId: ctx.chat.id };
+          session.authorizedGroupId = groupId;
+          session.isGlobalAdmin = false;
+          session.selectedGroupId = groupId; // Auto-select their group
+          adminSessions.set(userId, session);
+          return true;
+        }
+      } catch (error) {
+        console.log(`[AUTH] User ${userId} not found in group ${groupId}`);
+      }
     }
   }
   
@@ -167,10 +221,12 @@ async function isBanned(username, firstName, lastName, groupId) {
       if (username) {
         const usernameMatch = await matchesPattern(pattern.raw, username.toLowerCase());
         if (usernameMatch) {
+          incrementHitCounter(groupId, pattern.raw); // <--- ADD
           console.log(`[BAN_CHECK] ✅ BANNED - Username "${username}" matched pattern "${pattern.raw}"`);
           return true;
         }
       }
+
       
       // Test display name variations
       const displayName = [firstName, lastName].filter(Boolean).join(' ');
@@ -182,13 +238,15 @@ async function isBanned(username, firstName, lastName, groupId) {
           displayName.replace(/["'`\s]/g, '')
         ];
         
-        for (const variation of variations) {
-          const nameMatch = await matchesPattern(pattern.raw, variation.toLowerCase());
-          if (nameMatch) {
-            console.log(`[BAN_CHECK] ✅ BANNED - Display name "${variation}" matched pattern "${pattern.raw}"`);
-            return true;
-          }
+      for (const variation of variations) {
+        const nameMatch = await matchesPattern(pattern.raw, variation.toLowerCase());
+        if (nameMatch) {
+          incrementHitCounter(groupId, pattern.raw); // <--- ADD
+          console.log(`[BAN_CHECK] ✅ BANNED - Display name "${variation}" matched pattern "${pattern.raw}"`);
+          return true;
         }
+      }
+
       }
     } catch (err) {
       console.error(`[BAN_CHECK] Error testing pattern "${pattern.raw}": ${err.message}`);
@@ -298,39 +356,43 @@ async function loadSettings() {
     const data = await fs.readFile(SETTINGS_FILE, 'utf-8');
     const loadedSettings = JSON.parse(data);
     settings = {
-      ...settings,
+      groupActions: {},
       ...loadedSettings
     };
     
-    // Ensure groupActions exists
-    if (!settings.groupActions) {
-      settings.groupActions = {};
-      console.log(`[SETTINGS] Created empty groupActions object`);
-    }
-    
-    // Migrate from old global action setting if present
-    if (loadedSettings.action && Object.keys(settings.groupActions).length === 0) {
-      console.log(`[SETTINGS] Migrating old global action: ${loadedSettings.action}`);
-      WHITELISTED_GROUP_IDS.forEach(groupId => {
-        settings.groupActions[groupId] = loadedSettings.action;
-      });
-    }
-    
-    console.log(`[SETTINGS] Loaded settings:`, settings.groupActions);
+    console.log(`[SETTINGS] Loaded existing settings:`, settings);
   } catch (err) {
-    console.log(`[SETTINGS] No settings file found or error reading - using defaults`);
-    // Set default action for all whitelisted groups
-    settings.groupActions = {};
-    WHITELISTED_GROUP_IDS.forEach(groupId => {
-      settings.groupActions[groupId] = DEFAULT_ACTION;
-      console.log(`[SETTINGS] Default action for group ${groupId}: ${DEFAULT_ACTION}`);
-    });
-    try {
-      await saveSettings();
-    } catch (saveErr) {
-      console.error(`[SETTINGS] Failed to create initial settings file:`, saveErr);
-    }
+    console.log(`[SETTINGS] No settings file found or error reading - creating new settings`);
+    settings = {
+      groupActions: {}
+    };
   }
+  
+  // Ensure all whitelisted groups have settings entries
+  let settingsChanged = false;
+  WHITELISTED_GROUP_IDS.forEach(groupId => {
+    if (!settings.groupActions[groupId]) {
+      settings.groupActions[groupId] = DEFAULT_ACTION;
+      settingsChanged = true;
+      console.log(`[SETTINGS] Created default action for group ${groupId}: ${DEFAULT_ACTION}`);
+    }
+  });
+  
+  // Remove settings for groups no longer whitelisted
+  Object.keys(settings.groupActions).forEach(groupId => {
+    const numericGroupId = parseInt(groupId);
+    if (!WHITELISTED_GROUP_IDS.includes(numericGroupId)) {
+      delete settings.groupActions[groupId];
+      settingsChanged = true;
+      console.log(`[SETTINGS] Removed settings for non-whitelisted group ${groupId}`);
+    }
+  });
+  
+  if (settingsChanged) {
+    await saveSettings();
+  }
+  
+  console.log(`[SETTINGS] Final settings:`, settings.groupActions);
 }
 
 async function saveSettings() {
@@ -344,6 +406,55 @@ async function saveSettings() {
     console.error(`[SETTINGS] ❌ Error writing settings:`, err);
     return false;
   }
+}
+
+async function loadHitCounters() {
+  try {
+    const data = await fs.readFile(HIT_COUNTER_FILE, 'utf-8');
+    hitCounters = JSON.parse(data);
+    console.log(`[HITCOUNTER] Loaded hit counters from disk.`);
+  } catch (err) {
+    hitCounters = {};
+    if (err.code !== 'ENOENT') console.error(`[HITCOUNTER] Failed to load:`, err);
+    else console.log(`[HITCOUNTER] No hit counter file found. Starting fresh.`);
+  }
+}
+
+async function saveHitCounters() {
+  try {
+    await fs.writeFile(HIT_COUNTER_FILE, JSON.stringify(hitCounters, null, 2));
+    console.log(`[HITCOUNTER] Saved hit counters to disk.`);
+  } catch (err) {
+    console.error(`[HITCOUNTER] Failed to save hit counters:`, err);
+  }
+}
+
+function incrementHitCounter(groupId, patternRaw) {
+  if (!groupId || !patternRaw) return;
+  if (!hitCounters[groupId]) hitCounters[groupId] = {};
+  if (!hitCounters[groupId][patternRaw]) hitCounters[groupId][patternRaw] = 0;
+  hitCounters[groupId][patternRaw] += 1;
+  saveHitCounters();
+}
+
+function getHitStatsForGroup(groupId, topN = 5) {
+  const groupStats = hitCounters[groupId] || {};
+  // Sort by count descending
+  return Object.entries(groupStats)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, topN)
+    .map(([pattern, count]) => ({ pattern, count }));
+}
+
+function getHitStatsForPattern(patternRaw) {
+  // Return all group stats for this pattern
+  const results = [];
+  for (const [groupId, patterns] of Object.entries(hitCounters)) {
+    if (patterns[patternRaw]) {
+      results.push({ groupId, count: patterns[patternRaw] });
+    }
+  }
+  return results;
 }
 
 // Action Handlers
@@ -367,6 +478,80 @@ async function takePunishmentAction(ctx, userId, username, chatId) {
     console.error(`[PUNISH] ❌ Failed to ${isBan ? 'ban' : 'kick'} user ${userId}:`, error);
     return false;
   }
+}
+
+// Get all patterns from all groups for browsing/copying
+function getAllGroupPatterns() {
+  const allPatterns = new Map();
+  
+  WHITELISTED_GROUP_IDS.forEach(groupId => {
+    const patterns = groupPatterns.get(groupId) || [];
+    if (patterns.length > 0) {
+      allPatterns.set(groupId, patterns);
+    }
+  });
+  
+  return allPatterns;
+}
+
+// Copy patterns from one group to another
+async function copyPatternsToGroup(sourceGroupId, targetGroupId, patternIndices = null) {
+  console.log(`[COPY] Copying patterns from group ${sourceGroupId} to group ${targetGroupId}`);
+  
+  const sourcePatterns = groupPatterns.get(sourceGroupId) || [];
+  let targetPatterns = groupPatterns.get(targetGroupId) || [];
+  
+  if (sourcePatterns.length === 0) {
+    console.log(`[COPY] No patterns to copy from group ${sourceGroupId}`);
+    return { success: false, message: `No patterns found in source group ${sourceGroupId}` };
+  }
+  
+  let patternsToCopy = [];
+  
+  if (patternIndices === null) {
+    // Copy all patterns
+    patternsToCopy = sourcePatterns;
+    console.log(`[COPY] Copying all ${sourcePatterns.length} patterns`);
+  } else {
+    // Copy specific patterns by index
+    patternsToCopy = patternIndices.map(index => sourcePatterns[index]).filter(Boolean);
+    console.log(`[COPY] Copying ${patternsToCopy.length} selected patterns`);
+  }
+  
+  let addedCount = 0;
+  let skippedCount = 0;
+  
+  for (const pattern of patternsToCopy) {
+    // Check if pattern already exists
+    if (!targetPatterns.some(p => p.raw === pattern.raw)) {
+      // Check if we're at the limit
+      if (targetPatterns.length >= 100) {
+        console.log(`[COPY] Maximum patterns (100) reached for group ${targetGroupId}`);
+        break;
+      }
+      
+      targetPatterns.push(pattern);
+      addedCount++;
+      console.log(`[COPY] Added pattern: "${pattern.raw}"`);
+    } else {
+      skippedCount++;
+      console.log(`[COPY] Skipped duplicate pattern: "${pattern.raw}"`);
+    }
+  }
+  
+  if (addedCount > 0) {
+    groupPatterns.set(targetGroupId, targetPatterns);
+    await saveGroupPatterns(targetGroupId, targetPatterns);
+  }
+  
+  console.log(`[COPY] Copy complete: ${addedCount} added, ${skippedCount} skipped`);
+  
+  return {
+    success: true,
+    added: addedCount,
+    skipped: skippedCount,
+    message: `Copied ${addedCount} patterns (${skippedCount} duplicates skipped)`
+  };
 }
 
 // User Monitoring
@@ -430,52 +615,84 @@ async function showMainMenu(ctx) {
   
   const adminId = ctx.from.id;
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
-
-  // Initialize with default values if not present
-  if (!session.selectedGroupId && WHITELISTED_GROUP_IDS.length > 0) {
-    session.selectedGroupId = WHITELISTED_GROUP_IDS[0];
-    console.log(`[MENU] Auto-selected first group: ${session.selectedGroupId}`);
+  
+  // Determine which groups this user can manage
+  const isGlobalAdmin = WHITELISTED_USER_IDS.includes(adminId);
+  let manageableGroups = [];
+  
+  if (isGlobalAdmin) {
+    manageableGroups = WHITELISTED_GROUP_IDS;
+    session.isGlobalAdmin = true;
+    console.log(`[MENU] Global admin - can manage all groups: ${manageableGroups.join(', ')}`);
+  } else {
+    // Group admin - can only manage their authorized group
+    if (session.authorizedGroupId && WHITELISTED_GROUP_IDS.includes(session.authorizedGroupId)) {
+      manageableGroups = [session.authorizedGroupId];
+      console.log(`[MENU] Group admin - can manage group: ${session.authorizedGroupId}`);
+    } else {
+      console.log(`[MENU] No manageable groups found for user ${adminId}`);
+      await ctx.reply("You don't have permission to manage any groups.");
+      return;
+    }
+  }
+  
+  // Auto-select first manageable group if none selected
+  if (!session.selectedGroupId || !manageableGroups.includes(session.selectedGroupId)) {
+    session.selectedGroupId = manageableGroups[0];
+    console.log(`[MENU] Auto-selected group: ${session.selectedGroupId}`);
   }
 
   const selectedGroupId = session.selectedGroupId;
   const patterns = groupPatterns.get(selectedGroupId) || [];
   const groupAction = getGroupAction(selectedGroupId);
 
-  const text =
-    `🛡️ <b>Admin Menu</b>\n` +
-    `📍 Selected Group: ${selectedGroupId}\n` +
-    `📋 Patterns: ${patterns.length}\n` +
-    `⚔️ Action: ${groupAction.toUpperCase()}\n\n` +
-    `Use the buttons below to manage filters.`;
+  let text = `🛡️ <b>Admin Menu</b>\n`;
+  
+  if (isGlobalAdmin) {
+    text += `👑 <b>Global Admin Access</b>\n`;
+  } else {
+    text += `👮 <b>Group Admin Access</b>\n`;
+  }
+  
+  text += `📍 Selected Group: ${selectedGroupId}\n`;
+  text += `📋 Patterns: ${patterns.length}/100\n`;
+  text += `⚔️ Action: ${groupAction.toUpperCase()}\n\n`;
+  text += `Use the buttons below to manage filters.`;
 
-  // Create group selection buttons
-  const groupButtons = WHITELISTED_GROUP_IDS.map(groupId => ({
-    text: `${groupId === selectedGroupId ? '✅ ' : ''}Group ${groupId} (${getGroupAction(groupId).toUpperCase()})`,
-    callback_data: `select_group_${groupId}`
-  }));
+  // Create group selection buttons (only for groups user can manage)
+  const keyboard = { reply_markup: { inline_keyboard: [] } };
+  
+  if (manageableGroups.length > 1) {
+    const groupButtons = manageableGroups.map(groupId => ({
+      text: `${groupId === selectedGroupId ? '✅ ' : ''}Group ${groupId} (${getGroupAction(groupId).toUpperCase()})`,
+      callback_data: `select_group_${groupId}`
+    }));
 
-  // Split group buttons into rows of 2
-  const groupRows = [];
-  for (let i = 0; i < groupButtons.length; i += 2) {
-    groupRows.push(groupButtons.slice(i, i + 2));
+    // Split group buttons into rows of 2
+    const groupRows = [];
+    for (let i = 0; i < groupButtons.length; i += 2) {
+      groupRows.push(groupButtons.slice(i, i + 2));
+    }
+    keyboard.reply_markup.inline_keyboard.push(...groupRows);
   }
 
-  const keyboard = {
-    reply_markup: {
-      inline_keyboard: [
-        ...groupRows,
-        [
-          { text: '➕ Add Filter', callback_data: 'menu_addFilter' },
-          { text: '➖ Remove Filter', callback_data: 'menu_removeFilter' }
-        ],
-        [
-          { text: '📋 List Filters', callback_data: 'menu_listFilters' },
-          { text: `⚔️ Toggle: ${groupAction.toUpperCase()}`, callback_data: 'menu_toggleAction' }
-        ],
-        [{ text: '❓ Pattern Help', callback_data: 'menu_patternHelp' }]
-      ]
-    }
-  };
+  // Add management buttons
+  keyboard.reply_markup.inline_keyboard.push(
+    [
+      { text: '➕ Add Filter', callback_data: 'menu_addFilter' },
+      { text: '➖ Remove Filter', callback_data: 'menu_removeFilter' }
+    ],
+    [
+      { text: '📋 List Filters', callback_data: 'menu_listFilters' },
+      { text: '📥 Browse & Copy', callback_data: 'menu_browsePatterns' }
+    ],
+    [
+      { text: `⚔️ Action: ${groupAction.toUpperCase()}`, callback_data: 'menu_toggleAction' },
+      { text: '❓ Pattern Help', callback_data: 'menu_patternHelp' }
+    ]
+  );
+
+  adminSessions.set(adminId, session);
 
   try {
     if (session.menuMessageId) {
@@ -489,7 +706,6 @@ async function showMainMenu(ctx) {
         );
         console.log(`[MENU] Updated existing menu message`);
       } catch (err) {
-        // If the message content is unchanged, ignore the error
         if (!err.description || !err.description.includes("message is not modified")) {
           throw err;
         }
@@ -504,6 +720,139 @@ async function showMainMenu(ctx) {
   } catch (e) {
     console.error(`[MENU] Error showing main menu:`, e);
   }
+}
+
+async function showPatternBrowsingMenu(ctx) {
+  console.log(`[MENU] Showing pattern browsing menu for admin ${ctx.from.id}`);
+  
+  const adminId = ctx.from.id;
+  const session = adminSessions.get(adminId);
+  const currentGroupId = session.selectedGroupId;
+  
+  const allPatterns = getAllGroupPatterns();
+  
+  if (allPatterns.size === 0) {
+    await showOrEditMenu(ctx, 
+      `📥 <b>Browse & Copy Patterns</b>\n\nNo patterns found in any groups.`, 
+      {
+        parse_mode: 'HTML',
+        reply_markup: { 
+          inline_keyboard: [[{ text: '⬅️ Back to Menu', callback_data: 'menu_back' }]] 
+        }
+      }
+    );
+    return;
+  }
+  
+  let text = `📥 <b>Browse & Copy Patterns</b>\n`;
+  text += `Your Selected Group: ${currentGroupId}\n\n`;
+  text += `Select any group to view and copy patterns:\n\n`;
+  
+  const keyboard = { reply_markup: { inline_keyboard: [] } };
+  
+  // Add buttons for ALL groups that have patterns (including current group for viewing)
+  for (const [groupId, patterns] of allPatterns) {
+    const buttonText = groupId === currentGroupId 
+      ? `📍 Group ${groupId} (${patterns.length} patterns) - YOUR GROUP`
+      : `Group ${groupId} (${patterns.length} patterns)`;
+    
+    keyboard.reply_markup.inline_keyboard.push([{
+      text: buttonText,
+      callback_data: `browse_group_${groupId}`
+    }]);
+    
+    // Add sample patterns to the text
+    if (groupId === currentGroupId) {
+      text += `<b>📍 Group ${groupId} (Your Group):</b> ${patterns.length} patterns\n`;
+    } else {
+      text += `<b>Group ${groupId}:</b> ${patterns.length} patterns\n`;
+    }
+    const samplePatterns = patterns.slice(0, 3).map(p => `<code>${p.raw}</code>`).join(', ');
+    text += `${samplePatterns}${patterns.length > 3 ? '...' : ''}\n\n`;
+  }
+  
+  // If no other groups have patterns, show a note
+  if (allPatterns.size === 1 && allPatterns.has(currentGroupId)) {
+    text += `<i>💡 Only your group has patterns. Other groups will appear here once they add patterns.</i>\n\n`;
+  }
+  
+  keyboard.reply_markup.inline_keyboard.push([
+    { text: '⬅️ Back to Menu', callback_data: 'menu_back' }
+  ]);
+  
+  await showOrEditMenu(ctx, text, {
+    parse_mode: 'HTML',
+    ...keyboard
+  });
+}
+
+async function showGroupPatternsForCopy(ctx, sourceGroupId) {
+  console.log(`[MENU] Showing patterns from group ${sourceGroupId} for viewing/copying`);
+  
+  const adminId = ctx.from.id;
+  const session = adminSessions.get(adminId);
+  const targetGroupId = session.selectedGroupId;
+  
+  const sourcePatterns = groupPatterns.get(sourceGroupId) || [];
+  
+  if (sourcePatterns.length === 0) {
+    await showOrEditMenu(ctx, 
+      `📥 <b>Group ${sourceGroupId} Patterns</b>\n\nNo patterns found in this group.`, 
+      {
+        parse_mode: 'HTML',
+        reply_markup: { 
+          inline_keyboard: [[{ text: '⬅️ Back', callback_data: 'menu_browsePatterns' }]] 
+        }
+      }
+    );
+    return;
+  }
+  
+  const isOwnGroup = sourceGroupId === targetGroupId;
+  const canManageTarget = canManageGroup(adminId, targetGroupId);
+  
+  let text = `📥 <b>Group ${sourceGroupId} Patterns</b>\n`;
+  
+  if (isOwnGroup) {
+    text += `📍 <b>This is your selected group</b>\n\n`;
+  } else {
+    text += `To: Group ${targetGroupId} ${canManageTarget ? '✅' : '❌'}\n\n`;
+    if (!canManageTarget) {
+      text += `⚠️ <b>You cannot copy to Group ${targetGroupId}</b>\n`;
+      text += `You can only view these patterns.\n\n`;
+    }
+  }
+  
+  text += `<b>Available Patterns (${sourcePatterns.length}):</b>\n\n`;
+  
+  // Show all patterns with numbers
+  sourcePatterns.forEach((pattern, index) => {
+    text += `${index + 1}. <code>${pattern.raw}</code>\n`;
+  });
+  
+  const keyboard = { reply_markup: { inline_keyboard: [] } };
+  
+  // Only show copy buttons if not own group and can manage target
+  if (!isOwnGroup && canManageTarget) {
+    text += `\nChoose what to copy:`;
+    keyboard.reply_markup.inline_keyboard.push([
+      { text: '📋 Copy All', callback_data: `copy_all_${sourceGroupId}` },
+      { text: '🎯 Select Specific', callback_data: `copy_select_${sourceGroupId}` }
+    ]);
+  } else if (isOwnGroup) {
+    text += `\n💡 <i>This is your group. Use the main menu to manage these patterns.</i>`;
+  } else {
+    text += `\n💡 <i>You can view these patterns but cannot copy them to Group ${targetGroupId}.</i>`;
+  }
+  
+  keyboard.reply_markup.inline_keyboard.push([
+    { text: '⬅️ Back to Browse', callback_data: 'menu_browsePatterns' }
+  ]);
+  
+  await showOrEditMenu(ctx, text, {
+    parse_mode: 'HTML',
+    ...keyboard
+  });
 }
 
 // Show or edit a menu-like message (used for prompts)
@@ -610,7 +959,7 @@ async function promptForPattern(ctx, actionLabel) {
 
 // --- Admin Command and Callback Handlers ---
 
-// Direct messages in private chat for admin interaction
+// Text handler
 bot.on('text', async (ctx, next) => {
   if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) return next();
   
@@ -623,6 +972,7 @@ bot.on('text', async (ctx, next) => {
   if (input.toLowerCase() === '/cancel') {
     console.log(`[ADMIN_TEXT] Admin ${adminId} cancelled current action`);
     session.action = undefined;
+    session.copySourceGroupId = undefined;
     adminSessions.set(adminId, session);
     await deleteMenu(ctx, "Action cancelled.");
     await showMainMenu(ctx);
@@ -631,9 +981,11 @@ bot.on('text', async (ctx, next) => {
 
   if (session.action) {
     const groupId = session.selectedGroupId;
-    if (!groupId) {
-      console.log(`[ADMIN_TEXT] No group selected for admin ${adminId}`);
-      await ctx.reply("No group selected. Please select a group first.");
+    
+    // Verify user can manage this group
+    if (!groupId || !canManageGroup(adminId, groupId)) {
+      console.log(`[ADMIN_TEXT] Admin ${adminId} cannot manage group ${groupId}`);
+      await ctx.reply("You don't have permission to manage this group.");
       await showMainMenu(ctx);
       return;
     }
@@ -643,7 +995,6 @@ bot.on('text', async (ctx, next) => {
     if (session.action === 'Add Filter') {
       console.log(`[ADMIN_TEXT] Adding filter for group ${groupId}: "${input}"`);
       try {
-        // Use security module to validate and create pattern
         const patternObj = createPatternObject(input);
         
         if (patterns.some(p => p.raw === patternObj.raw)) {
@@ -676,9 +1027,41 @@ bot.on('text', async (ctx, next) => {
         console.log(`[ADMIN_TEXT] Pattern not found: "${input}"`);
         await ctx.reply(`Pattern "${input}" not found in Group ${groupId}.`);
       }
+    } else if (session.action === 'Select Patterns') {
+      // Handle pattern selection for copying
+      const sourceGroupId = session.copySourceGroupId;
+      const sourcePatterns = groupPatterns.get(sourceGroupId) || [];
+      
+      console.log(`[ADMIN_TEXT] Selecting patterns to copy: "${input}"`);
+      
+      let patternIndices = [];
+      
+      if (input.toLowerCase() === 'all') {
+        patternIndices = sourcePatterns.map((_, index) => index);
+      } else {
+        // Parse comma-separated numbers
+        const numbers = input.split(',').map(s => parseInt(s.trim()) - 1); // Convert to 0-based
+        patternIndices = numbers.filter(n => !isNaN(n) && n >= 0 && n < sourcePatterns.length);
+        
+        if (patternIndices.length === 0) {
+          await ctx.reply(`Invalid selection. Please enter pattern numbers (1-${sourcePatterns.length}) separated by commas, or "all".`);
+          return;
+        }
+      }
+      
+      console.log(`[ADMIN_TEXT] Selected pattern indices: ${patternIndices.join(', ')}`);
+      
+      const result = await copyPatternsToGroup(sourceGroupId, groupId, patternIndices);
+      
+      if (result.success) {
+        await ctx.reply(`✅ ${result.message}`);
+      } else {
+        await ctx.reply(`❌ ${result.message}`);
+      }
     }
 
     session.action = undefined;
+    session.copySourceGroupId = undefined;
     adminSessions.set(adminId, session);
     await showMainMenu(ctx);
     return;
@@ -690,7 +1073,7 @@ bot.on('text', async (ctx, next) => {
   }
 });
 
-// Callback handler for inline buttons in admin menu
+// Enhanced callback handler with browsing functionality (FIXED - no duplicates)
 bot.on('callback_query', async (ctx) => {
   if (ctx.chat?.type !== 'private' || !(await isAuthorized(ctx))) {
     return ctx.answerCbQuery('Not authorized.');
@@ -703,27 +1086,118 @@ bot.on('callback_query', async (ctx) => {
   const adminId = ctx.from.id;
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
 
-  // Handle group selection
+  // Handle group selection (only allow if user can manage that group)
   if (data.startsWith('select_group_')) {
     const groupId = parseInt(data.replace('select_group_', ''));
-    if (WHITELISTED_GROUP_IDS.includes(groupId)) {
+    
+    if (canManageGroup(adminId, groupId)) {
       session.selectedGroupId = groupId;
       adminSessions.set(adminId, session);
       console.log(`[CALLBACK] Admin ${adminId} selected group: ${groupId}`);
       await ctx.answerCbQuery(`Selected Group: ${groupId}`);
       await showMainMenu(ctx);
       return;
+    } else {
+      console.log(`[CALLBACK] Admin ${adminId} denied access to group ${groupId}`);
+      await ctx.answerCbQuery('You cannot manage this group.');
+      return;
     }
   }
 
+  // Handle pattern browsing - allow any authorized user to browse all patterns
+  if (data === 'menu_browsePatterns') {
+    console.log(`[CALLBACK] Admin ${adminId} wants to browse patterns`);
+    await showPatternBrowsingMenu(ctx);
+    return;
+  }
+
+  // Allow browsing any group's patterns - authorization check is only for copying
+  if (data.startsWith('browse_group_')) {
+    const sourceGroupId = parseInt(data.replace('browse_group_', ''));
+    console.log(`[CALLBACK] Admin ${adminId} browsing patterns from group ${sourceGroupId}`);
+    await showGroupPatternsForCopy(ctx, sourceGroupId);
+    return;
+  }
+
+  // Copy operations require permission check for target group only
+  if (data.startsWith('copy_all_')) {
+    const sourceGroupId = parseInt(data.replace('copy_all_', ''));
+    const targetGroupId = session.selectedGroupId;
+    
+    if (!canManageGroup(adminId, targetGroupId)) {
+      await ctx.answerCbQuery('You cannot manage the target group.');
+      return;
+    }
+    
+    console.log(`[CALLBACK] Copying all patterns from ${sourceGroupId} to ${targetGroupId}`);
+    const result = await copyPatternsToGroup(sourceGroupId, targetGroupId);
+    
+    if (result.success) {
+      await ctx.answerCbQuery(`Success! ${result.message}`);
+      // Update the browsing menu to show the result
+      let resultText = `✅ <b>Copy Complete!</b>\n\n`;
+      resultText += `From: Group ${sourceGroupId}\n`;
+      resultText += `To: Group ${targetGroupId}\n\n`;
+      resultText += `${result.message}\n\n`;
+      resultText += `Use the button below to return to the main menu.`;
+      
+      await showOrEditMenu(ctx, resultText, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[{ text: '🏠 Back to Main Menu', callback_data: 'menu_back' }]]
+        }
+      });
+    } else {
+      await ctx.answerCbQuery(`Error: ${result.message}`);
+    }
+    return;
+  }
+
+  if (data.startsWith('copy_select_')) {
+    const sourceGroupId = parseInt(data.replace('copy_select_', ''));
+    const targetGroupId = session.selectedGroupId;
+    
+    // Check permission for target group
+    if (!canManageGroup(adminId, targetGroupId)) {
+      await ctx.answerCbQuery('You cannot manage the target group.');
+      return;
+    }
+    
+    // Store the source group for pattern selection
+    session.copySourceGroupId = sourceGroupId;
+    session.action = 'Select Patterns';
+    adminSessions.set(adminId, session);
+    
+    const sourcePatterns = groupPatterns.get(sourceGroupId) || [];
+    let text = `🎯 <b>Select Patterns to Copy</b>\n\n`;
+    text += `From: Group ${sourceGroupId}\n`;
+    text += `To: Group ${targetGroupId}\n\n`;
+    text += `Send pattern numbers separated by commas (e.g., "1,3,5") or "all" for all patterns:\n\n`;
+    
+    sourcePatterns.forEach((pattern, index) => {
+      text += `${index + 1}. <code>${pattern.raw}</code>\n`;
+    });
+    
+    await showOrEditMenu(ctx, text, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [[{ text: '❌ Cancel', callback_data: 'menu_browsePatterns' }]]
+      }
+    });
+    return;
+  }
+
   const groupId = session.selectedGroupId;
-  if (!groupId && !data.includes('menu_back')) {
-    console.log(`[CALLBACK] No group selected for callback: ${data}`);
-    await ctx.answerCbQuery('No group selected');
+  
+  // Verify user can manage the selected group (only for management operations, not browsing)
+  if (!groupId || !canManageGroup(adminId, groupId)) {
+    console.log(`[CALLBACK] Admin ${adminId} cannot manage selected group ${groupId}`);
+    await ctx.answerCbQuery('You cannot manage this group.');
     await showMainMenu(ctx);
     return;
   }
 
+  // Existing callback handlers...
   if (data === 'menu_addFilter') {
     console.log(`[CALLBACK] Admin ${adminId} wants to add filter for group ${groupId}`);
     await promptForPattern(ctx, 'Add Filter');
@@ -735,8 +1209,8 @@ bot.on('callback_query', async (ctx) => {
         reply_markup: { inline_keyboard: [[{ text: 'Back to Menu', callback_data: 'menu_back' }]] }
       });
     } else {
-      const list = patterns.map(p => `<code>${p.raw}</code>`).join('\n');
-      await showOrEditMenu(ctx, `Current filters for Group ${groupId}:\n${list}\n\nEnter filter to remove:`, { 
+      const list = patterns.map((p, index) => `${index + 1}. <code>${p.raw}</code>`).join('\n');
+      await showOrEditMenu(ctx, `Current filters for Group ${groupId}:\n${list}\n\nEnter filter to remove (exact text):`, { 
         parse_mode: 'HTML', 
         reply_markup: { inline_keyboard: [[{ text: 'Back to Menu', callback_data: 'menu_back' }]] } 
       });
@@ -751,14 +1225,13 @@ bot.on('callback_query', async (ctx) => {
         reply_markup: { inline_keyboard: [[{ text: 'Back to Menu', callback_data: 'menu_back' }]] }
       });
     } else {
-      const list = patterns.map(p => `<code>${p.raw}</code>`).join('\n');
-      await ctx.editMessageText(`Current filters for Group ${groupId}:\n${list}`, {
+      const list = patterns.map((p, index) => `${index + 1}. <code>${p.raw}</code>`).join('\n');
+      await ctx.editMessageText(`Current filters for Group ${groupId} (${patterns.length}/100):\n${list}`, {
         parse_mode: 'HTML',
         reply_markup: { inline_keyboard: [[{ text: 'Back to Menu', callback_data: 'menu_back' }]] }
       });
     }
   } else if (data === 'menu_toggleAction') {
-    // Toggle action for the selected group only
     const currentAction = getGroupAction(groupId);
     const newAction = currentAction === 'ban' ? 'kick' : 'ban';
     settings.groupActions[groupId] = newAction;
@@ -800,7 +1273,8 @@ bot.on('callback_query', async (ctx) => {
       `<b>💡 Tips:</b>\n` +
       `• Test patterns with /testpattern\n` +
       `• Start simple, then get complex\n` +
-      `• Patterns are checked against usernames AND display names`;
+      `• Patterns are checked against usernames AND display names\n` +
+      `• Use Browse & Copy to share patterns between groups`;
 
     await ctx.editMessageText(helpText, {
       parse_mode: 'HTML',
@@ -824,9 +1298,9 @@ bot.command('addFilter', async (ctx) => {
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
   const groupId = session.selectedGroupId;
 
-  if (!groupId) {
-    console.log(`[COMMAND] No group selected for addFilter`);
-    return ctx.reply('No group selected. Use /menu to select a group first.');
+  if (!groupId || !canManageGroup(adminId, groupId)) {
+    console.log(`[COMMAND] No manageable group selected for addFilter`);
+    return ctx.reply('No group selected or permission denied. Use /menu to select a group first.');
   }
 
   const parts = ctx.message.text.split(' ');
@@ -849,28 +1323,21 @@ bot.command('addFilter', async (ctx) => {
   const pattern = parts.slice(1).join(' ').trim();
   
   try {
-    // Use security module to validate and create pattern
     const patternObj = createPatternObject(pattern);
-    
     let patterns = groupPatterns.get(groupId) || [];
     
-    // Check for duplicates
     if (patterns.some(p => p.raw === patternObj.raw)) {
       console.log(`[COMMAND] Pattern already exists: "${patternObj.raw}"`);
       return ctx.reply(`Pattern "${patternObj.raw}" already exists.`);
     }
     
-    // Check pattern limit
     if (patterns.length >= 100) {
       console.log(`[COMMAND] Maximum patterns reached for group ${groupId}`);
       return ctx.reply(`Maximum patterns reached (100 per group).`);
     }
     
-    // Add the pattern
     patterns.push(patternObj);
     groupPatterns.set(groupId, patterns);
-    
-    // Save to file
     await saveGroupPatterns(groupId, patterns);
     
     console.log(`[COMMAND] ✅ Added pattern "${patternObj.raw}" to group ${groupId}`);
@@ -890,9 +1357,9 @@ bot.command('removeFilter', async (ctx) => {
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
   const groupId = session.selectedGroupId;
 
-  if (!groupId) {
-    console.log(`[COMMAND] No group selected for removeFilter`);
-    return ctx.reply('No group selected. Use /menu to select a group first.');
+  if (!groupId || !canManageGroup(adminId, groupId)) {
+    console.log(`[COMMAND] No manageable group selected for removeFilter`);
+    return ctx.reply('No group selected or permission denied. Use /menu to select a group first.');
   }
 
   let patterns = groupPatterns.get(groupId) || [];
@@ -932,9 +1399,9 @@ bot.command('listFilters', async (ctx) => {
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
   const groupId = session.selectedGroupId;
 
-  if (!groupId) {
-    console.log(`[COMMAND] No group selected for listFilters`);
-    return ctx.reply('No group selected. Use /menu to select a group first.');
+  if (!groupId || !canManageGroup(adminId, groupId)) {
+    console.log(`[COMMAND] No manageable group selected for listFilters`);
+    return ctx.reply('No group selected or permission denied. Use /menu to select a group first.');
   }
 
   const patterns = groupPatterns.get(groupId) || [];
@@ -981,36 +1448,24 @@ bot.command('chatinfo', async (ctx) => {
   }
 });
 
-// Set action command
+// Set action command with enhanced group permission checks
 bot.command('setaction', async (ctx) => {
   if (!(await isAuthorized(ctx))) return;
   
   console.log(`[COMMAND] /setaction from user ${ctx.from.id}: "${ctx.message.text}"`);
   
   const args = ctx.message.text.split(' ');
+  const userId = ctx.from.id;
   
-  // If in group, check if user is admin of that group
+  // If in group, check if user can manage that specific group
   if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
-    console.log(`[COMMAND] setaction in group ${ctx.chat.id}`);
-    
-    if (!WHITELISTED_GROUP_IDS.includes(ctx.chat.id)) {
-      console.log(`[COMMAND] Group ${ctx.chat.id} not whitelisted`);
-      return ctx.reply('This command only works in whitelisted groups.');
-    }
-    
-    // Check if user is admin of this specific group
-    try {
-      const user = await ctx.getChatMember(ctx.from.id);
-      if (user.status !== 'administrator' && user.status !== 'creator' && !WHITELISTED_USER_IDS.includes(ctx.from.id)) {
-        console.log(`[COMMAND] User ${ctx.from.id} not admin in group ${ctx.chat.id}`);
-        return ctx.reply('You must be a group admin to change this setting.');
-      }
-    } catch (e) {
-      console.error(`[COMMAND] Error checking admin status:`, e);
-      return ctx.reply('Error checking admin status.');
-    }
-    
     const groupId = ctx.chat.id;
+    
+    if (!canManageGroup(userId, groupId)) {
+      console.log(`[COMMAND] User ${userId} cannot manage group ${groupId}`);
+      return ctx.reply('You do not have permission to configure this group.');
+    }
+    
     const currentAction = getGroupAction(groupId);
     
     if (args.length < 2) {
@@ -1038,13 +1493,12 @@ bot.command('setaction', async (ctx) => {
   // If in private chat, use selected group from session
   else {
     console.log(`[COMMAND] setaction in private chat`);
-    const adminId = ctx.from.id;
-    let session = adminSessions.get(adminId) || {};
+    const session = adminSessions.get(userId) || {};
     const groupId = session.selectedGroupId;
     
-    if (!groupId) {
-      console.log(`[COMMAND] No group selected for private setaction`);
-      return ctx.reply('No group selected. Use /menu to select a group first.');
+    if (!groupId || !canManageGroup(userId, groupId)) {
+      console.log(`[COMMAND] User ${userId} cannot manage selected group ${groupId}`);
+      return ctx.reply('You do not have permission to manage the selected group. Use /menu to see available options.');
     }
     
     const currentAction = getGroupAction(groupId);
@@ -1088,7 +1542,6 @@ bot.command('testpattern', async (ctx) => {
   const testString = parts.slice(2).join(' ');
   
   try {
-    // Use security module to test the pattern
     const result = await matchesPattern(pattern, testString);
     console.log(`[COMMAND] Pattern test: "${pattern}" ${result ? 'matches' : 'does not match'} "${testString}"`);
     return ctx.reply(`Pattern "${pattern}" ${result ? 'matches' : 'does not match'} "${testString}"`);
@@ -1107,6 +1560,43 @@ bot.command('menu', async (ctx) => {
   
   console.log(`[COMMAND] /menu from admin ${ctx.from.id}`);
   await showMainMenu(ctx);
+});
+
+bot.command('hits', async (ctx) => {
+  const isPrivate = ctx.chat.type === 'private';
+  const isAdmin = isPrivate && await isAuthorized(ctx);
+  const args = ctx.message.text.split(' ').slice(1);
+  let reply = '';
+
+  // Pattern-specific (admin/DM only)
+  if (isAdmin && args.length > 0) {
+    const patternRaw = args.join(' ').trim();
+    const stats = getHitStatsForPattern(patternRaw);
+    if (stats.length === 0) {
+      reply = `No recorded hits for pattern:\n<code>${patternRaw}</code>`;
+    } else {
+      reply = `📊 Hit counts for pattern <code>${patternRaw}</code>:\n`;
+      for (const { groupId, count } of stats) {
+        reply += `• Group <b>${groupId}</b>: <b>${count}</b> hit(s)\n`;
+      }
+    }
+    return ctx.reply(reply, { parse_mode: 'HTML' });
+  }
+
+  // Group stats (group or DM)
+  const groupId = isPrivate ? (adminSessions.get(ctx.from.id)?.selectedGroupId) : ctx.chat.id;
+  if (!groupId || !hitCounters[groupId] || Object.keys(hitCounters[groupId]).length === 0) {
+    reply = `No pattern hits recorded for this group yet.`;
+  } else {
+    const stats = getHitStatsForGroup(groupId, 10);
+    reply = `📈 <b>Top Pattern Hits in Group ${groupId}</b>:\n`;
+    for (const { pattern, count } of stats) {
+      reply += `• <code>${pattern}</code>: <b>${count}</b>\n`;
+    }
+    const total = Object.values(hitCounters[groupId]).reduce((a, b) => a + b, 0);
+    reply += `\n<b>Total matches:</b> ${total}`;
+  }
+  return ctx.reply(reply, { parse_mode: 'HTML' });
 });
 
 // Help and Start commands
@@ -1131,6 +1621,12 @@ bot.command('help', async (ctx) => {
     `• Simple text: "spam"\n` +
     `• Wildcards: "spam*site", "*bad*user*"\n` +
     `• Regex: "/^bad.*user$/i"\n\n` +
+
+    `Features:\n` +
+    `• Group-specific pattern management\n` +
+    `• Browse and copy patterns between groups\n` +
+    `• Per-group ban/kick settings\n` +
+    `• Real-time name change monitoring\n\n` +
 
     `The bot checks user names when they:\n` +
     `1. Join a group\n` +
@@ -1160,6 +1656,11 @@ bot.command('start', async (ctx) => {
     `2. Select your group\n` +
     `3. Add patterns (text, wildcards, or regex)\n` +
     `4. Choose ban or kick action\n\n` +
+    
+    `<b>New Features:</b>\n` +
+    `• Browse & copy patterns between groups\n` +
+    `• Per-group settings management\n` +
+    `• Enhanced admin controls\n\n` +
     
     `<b>Pattern Examples:</b>\n` +
     `• <code>spam</code> - blocks exact text\n` +
@@ -1272,6 +1773,7 @@ async function startup() {
   await ensureBannedPatternsDirectory();
   await loadSettings();
   await loadAllGroupPatterns();
+  await loadHitCounters();
 
   // Ensure all whitelisted groups have an action setting
   WHITELISTED_GROUP_IDS.forEach(groupId => {
@@ -1295,6 +1797,8 @@ async function startup() {
     console.log(`✅ Security module active`);
     console.log(`✅ Pattern validation enabled`);
     console.log(`✅ Regex timeout protection enabled`);
+    console.log(`✅ Enhanced group management enabled`);
+    console.log(`✅ Pattern browsing & copying enabled`);
     console.log(`✅ Comprehensive logging enabled`);
     console.log('Bot is running. Press Ctrl+C to stop.');
     console.log('==============================\n');

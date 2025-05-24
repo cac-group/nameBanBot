@@ -1,6 +1,6 @@
 {
-  "name": "banBaby",
-  "version": "1.2.0",
+  "name": "namebanbot",
+  "version": "2.0.0",
   "main": "bot.js",
   "type": "module",
   "license": "MIT",
@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "dotenv": "^16.5.0",
-    "fs": "^0.0.1-security",
     "telegraf": "^4.16.3",
     "toml": "^3.0.0"
   },
