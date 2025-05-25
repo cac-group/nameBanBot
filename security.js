@@ -1,4 +1,4 @@
-// security.js - Pattern security functions for the Telegram ban bot
+// security.js - Pattern security functions
 
 /**
  * Safe regex compilation with basic protections
@@ -141,19 +141,77 @@ export async function matchesPattern(pattern, testString) {
       return false;
     }
     
-    // For regex patterns with anchors, reject if control characters break the intended match
-    if (pattern.startsWith('/') && pattern.includes('$')) {
-      // Anchored regex patterns should reject control characters
-      // eslint-disable-next-line no-control-regex
-      if (/[\x00-\x1F\x7F]/.test(testString)) {
-        return false;
-      }
-    }
-    
     // Ignore log-like sequences in brackets [TEXT]
     // This prevents matching content that looks like log markers
     if (/^\[.*\]$/.test(testString.trim())) {
       return false;
+    }
+    
+    // Handle control characters based on pattern type
+    // eslint-disable-next-line no-control-regex
+    const hasControlChars = /[\x00-\x1F\x7F]/.test(testString);
+    
+    if (hasControlChars) {
+      // For regex patterns that should match across newlines, allow control chars
+      if (pattern.startsWith('/') && !pattern.includes('
+
+/**
+ * Create a safe regex object with metadata
+ * @param {string} patternStr - Raw pattern string
+ * @returns {Object} - Object with raw pattern and compiled regex
+ */
+export function createPatternObject(rawPattern) {
+  const validated = validatePattern(rawPattern);
+  const regex = compileSafeRegex(validated);
+  return {
+    raw: validated,
+    regex
+  };
+}
+
+/**
+ * Batch validate and compile multiple patterns
+ * @param {string[]} patterns - Array of pattern strings
+ * @returns {Object[]} - Array of pattern objects
+ */
+export function validatePatterns(patterns) {
+  if (!Array.isArray(patterns)) {
+    throw new Error('Patterns must be an array');
+  }
+  
+  const validatedPatterns = [];
+  const errors = [];
+  
+  for (let i = 0; i < patterns.length; i++) {
+    try {
+      const patternObj = createPatternObject(patterns[i]);
+      validatedPatterns.push(patternObj);
+    } catch (err) {
+      errors.push({ index: i, pattern: patterns[i], error: err.message });
+    }
+  }
+  
+  return {
+    valid: validatedPatterns,
+    errors: errors
+  };
+}
+
+// Export all functions as a default object as well
+export default {
+  compileSafeRegex,
+  validatePattern,
+  testPatternSafely,
+  matchesPattern,
+  createPatternObject,
+  validatePatterns
+};)) {
+        // Non-anchored regex can match strings with control chars
+        // But only if the pattern itself doesn't rely on line boundaries
+      } else {
+        // For all other patterns (plain text, wildcards, anchored regex), reject control chars
+        return false;
+      }
     }
     
     // Compile the pattern safely
