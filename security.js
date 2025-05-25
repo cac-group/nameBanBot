@@ -1,4 +1,4 @@
-// security.js - Pattern security functions
+// security.js - Pattern security functions for the Telegram ban bot
 
 /**
  * Safe regex compilation with basic protections
@@ -17,17 +17,17 @@ export function compileSafeRegex(patternStr) {
     if (lastSlash > 0) {
       const pattern = patternStr.slice(1, lastSlash);
       const flags = patternStr.slice(lastSlash + 1);
-
+      
       // Sanitize flags - only allow safe flags
       const safeFlags = flags.replace(/[^gimsu]/g, '');
-
+      
       try {
         // Compile and test the regex
         const regex = new RegExp(pattern, safeFlags);
-
+        
         // Quick test to ensure regex doesn't crash
         'test'.match(regex);
-
+        
         return regex;
       } catch (err) {
         throw new Error(`Invalid regex pattern: ${err.message}`);
@@ -35,7 +35,7 @@ export function compileSafeRegex(patternStr) {
     }
   }
   
-  // Handle wildcard patterns
+  // Handle wildcard patterns with proper word boundaries
   if (patternStr.includes('*') || patternStr.includes('?')) {
     // Escape regex special characters except * and ?
     let escaped = patternStr.replace(/[.+^${}()|[\]\\]/g, '\\$&');
@@ -80,27 +80,27 @@ export function validatePattern(pattern) {
   if (typeof pattern !== 'string') {
     throw new Error('Pattern must be a string');
   }
-
+  
   // Remove control characters
   // eslint-disable-next-line no-control-regex
   const cleaned = pattern.replace(/[\x00-\x1F\x7F]/g, '');
-
+  
   // Check maximum length
   if (cleaned.length > 500) {
     throw new Error('Pattern too long (max 500 characters)');
   }
-
+  
   if (cleaned.length === 0) {
     throw new Error('Pattern cannot be empty');
   }
-
+  
   // Test regex compilation to catch syntax errors early
   try {
     compileSafeRegex(cleaned);
   } catch (err) {
     throw new Error(`Pattern validation failed: ${err.message}`);
   }
-
+  
   return cleaned;
 }
 
@@ -116,7 +116,7 @@ export function testPatternSafely(regex, testString, timeoutMs = 100) {
     const timeout = setTimeout(() => {
       reject(new Error('Pattern matching timeout'));
     }, timeoutMs);
-
+    
     try {
       const result = regex.test(testString);
       clearTimeout(timeout);
@@ -141,15 +141,24 @@ export async function matchesPattern(pattern, testString) {
       return false;
     }
     
-    // Check for control characters in test string - if found, reject match
-    // eslint-disable-next-line no-control-regex
-    if (/[\x00-\x1F\x7F]/.test(testString)) {
+    // For regex patterns with anchors, reject if control characters break the intended match
+    if (pattern.startsWith('/') && pattern.includes('$')) {
+      // Anchored regex patterns should reject control characters
+      // eslint-disable-next-line no-control-regex
+      if (/[\x00-\x1F\x7F]/.test(testString)) {
+        return false;
+      }
+    }
+    
+    // Ignore log-like sequences in brackets [TEXT]
+    // This prevents matching content that looks like log markers
+    if (/^\[.*\]$/.test(testString.trim())) {
       return false;
     }
     
     // Compile the pattern safely
     const regex = compileSafeRegex(pattern);
-
+    
     // Test with timeout protection
     return await testPatternSafely(regex, testString);
   } catch (err) {
@@ -181,10 +190,10 @@ export function validatePatterns(patterns) {
   if (!Array.isArray(patterns)) {
     throw new Error('Patterns must be an array');
   }
-
+  
   const validatedPatterns = [];
   const errors = [];
-
+  
   for (let i = 0; i < patterns.length; i++) {
     try {
       const patternObj = createPatternObject(patterns[i]);
@@ -193,7 +202,7 @@ export function validatePatterns(patterns) {
       errors.push({ index: i, pattern: patterns[i], error: err.message });
     }
   }
-
+  
   return {
     valid: validatedPatterns,
     errors: errors
