@@ -1,4 +1,4 @@
-// bot.js\
+// bot.js - Updated with accurate help text and no emojis
 
 import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
@@ -814,9 +814,9 @@ async function showGroupPatternsForCopy(ctx, sourceGroupId) {
   if (isOwnGroup) {
     text += `<b>This is your selected group</b>\n\n`;
   } else {
-    text += `To: Group ${targetGroupId} ${canManageTarget ? '✅' : '❌'}\n\n`;
+    text += `To: Group ${targetGroupId} ${canManageTarget ? 'OK' : 'NO ACCESS'}\n\n`;
     if (!canManageTarget) {
-      text += `⚠️ <b>You cannot copy to Group ${targetGroupId}</b>\n`;
+      text += `<b>You cannot copy to Group ${targetGroupId}</b>\n`;
       text += `You can only view these patterns.\n\n`;
     }
   }
@@ -918,31 +918,31 @@ async function promptForPattern(ctx, actionLabel) {
   const groupId = session.selectedGroupId;
 
   const promptText = 
-  `<b>Add Pattern for Group ${groupId}</b>\n\n` +
-  
-  `<b>Pattern Types:</b>\n\n` +
-  
-  `<b>1. Simple Text</b> - Case-insensitive substring match\n` +
-  `   • <code>spam</code> matches "SPAM", "Spam", "spammer"\n\n` +
-  
-  `<b>2. Wildcards</b>\n` +
-  `   • <code>*</code> = any characters\n` +
-  `   • <code>?</code> = single character\n` +
-  `   • <code>spam*</code> matches "spam", "spammer", "spam123"\n` +
-  `   • <code>*bot</code> matches "mybot", "testbot", "123bot"\n` +
-  `   • <code>*bad*</code> matches "baduser", "this_is_bad"\n` +
-  `   • <code>test?</code> matches "test1", "testa", "tests"\n\n` +
-  
-  `<b>3. Regular Expressions</b> - Advanced patterns\n` +
-  `   • Format: <code>/pattern/flags</code>\n` +
-  `   • <code>/^spam.*$/i</code> starts with "spam"\n` +
-  `   • <code>/\\d{5,}/</code> 5+ digits in a row\n` +
-  `   • <code>/ch[!1i]ld/i</code> "child", "ch!ld", "ch1ld"\n\n` +
-  
-  `<b>Examples:</b>\n` +
-  `• <code>ranger</code> - blocks substring "ranger"\n` +
-  `• <code>*porn*</code> - blocks anything containing "porn"\n` +
-  `• <code>/heart.*ch.ld.*p.rn/i</code> - blocks heart+variations\n\n` +
+    `<b>Add Pattern for Group ${groupId}</b>\n\n` +
+    
+    `<b>Pattern Types:</b>\n\n` +
+    
+    `<b>1. Simple Text</b> - Case-insensitive substring match\n` +
+    `   • <code>spam</code> matches "SPAM", "Spam", "spammer"\n\n` +
+    
+    `<b>2. Wildcards</b>\n` +
+    `   • <code>*</code> = any characters\n` +
+    `   • <code>?</code> = single character\n` +
+    `   • <code>spam*</code> matches "spam", "spammer", "spam123"\n` +
+    `   • <code>*bot</code> matches "mybot", "testbot", "123bot"\n` +
+    `   • <code>*bad*</code> matches "baduser", "this_is_bad"\n` +
+    `   • <code>test?</code> matches "test1", "testa", "tests"\n\n` +
+    
+    `<b>3. Regular Expressions</b> - Advanced patterns\n` +
+    `   • Format: <code>/pattern/flags</code>\n` +
+    `   • <code>/^spam.*$/i</code> starts with "spam"\n` +
+    `   • <code>/\\d{5,}/</code> 5+ digits in a row\n` +
+    `   • <code>/ch[!1i]ld/i</code> "child", "ch!ld", "ch1ld"\n\n` +
+    
+    `<b>Examples:</b>\n` +
+    `• <code>ranger</code> - blocks substring "ranger"\n` +
+    `• <code>*porn*</code> - blocks anything containing "porn"\n` +
+    `• <code>/heart.*ch.ld.*p.rn/i</code> - blocks heart+variations\n\n` +
     
     `Send your pattern or /cancel to abort.`;
 
@@ -1072,7 +1072,7 @@ bot.on('text', async (ctx, next) => {
   }
 });
 
-// callback handler
+// Callback handler
 bot.on('callback_query', async (ctx) => {
   if (ctx.chat?.type !== 'private' || !(await isAuthorized(ctx))) {
     return ctx.answerCbQuery('Not authorized.');
@@ -1559,6 +1559,140 @@ bot.command('testpattern', async (ctx) => {
   }
 });
 
+// In-line test - simulate ban checking logic in-app
+bot.command('testuser', async (ctx) => {
+  if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) return;
+  
+  console.log(`[COMMAND] /testuser from admin ${ctx.from.id}: "${ctx.message.text}"`);
+  
+  const parts = ctx.message.text.split(' ');
+  if (parts.length < 3) {
+    console.log(`[COMMAND] testuser usage help requested`);
+    return ctx.reply(
+      `<b>Usage: /testuser &lt;pattern&gt; &lt;username&gt; [first_name] [last_name]</b>\n\n` +
+      `<b>Examples:</b>\n` +
+      `<code>/testuser spam spammer123</code>\n` +
+      `<code>/testuser *bot* testbot</code>\n` +
+      `<code>/testuser evil eviluser "Evil User"</code>\n` +
+      `<code>/testuser /^bad/i badguy "Bad" "Guy"</code>\n\n` +
+      `This simulates the full ban check process including all name variations.`,
+      { parse_mode: 'HTML' }
+    );
+  }
+  
+  const pattern = parts[1];
+  const username = parts[2] || null;
+  
+  // Parse display name - handle quoted strings
+  let remainingParts = parts.slice(3);
+  let firstName = null;
+  let lastName = null;
+  
+  if (remainingParts.length > 0) {
+    const fullName = remainingParts.join(' ');
+    
+    // Try to parse quoted names
+    const quotedMatch = fullName.match(/^"([^"]*)"(?:\s+"([^"]*)")?/);
+    if (quotedMatch) {
+      firstName = quotedMatch[1] || null;
+      lastName = quotedMatch[2] || null;
+    } else {
+      // Split by spaces
+      const nameParts = fullName.split(' ');
+      firstName = nameParts[0] || null;
+      lastName = nameParts.slice(1).join(' ') || null;
+    }
+  }
+  
+  try {
+    // Create a pattern object to validate it
+    const patternObj = createPatternObject(pattern);
+    
+    console.log(`[TESTUSER] Testing pattern "${pattern}" against user: @${username || 'none'}, "${firstName || ''} ${lastName || ''}".trim()`);
+    
+    // Simulate the exact logic from isBanned function
+    let testResults = [];
+    let overallBanned = false;
+    
+    // Test username if provided
+    if (username) {
+      const usernameMatch = await matchesPattern(pattern, username.toLowerCase());
+      testResults.push({
+        type: 'Username',
+        value: username,
+        tested: username.toLowerCase(),
+        result: usernameMatch
+      });
+      if (usernameMatch) overallBanned = true;
+    }
+    
+    // Test display name variations if provided
+    const displayName = [firstName, lastName].filter(Boolean).join(' ');
+    if (displayName) {
+      const variations = [
+        { name: 'Display name', value: displayName },
+        { name: 'Without quotes', value: displayName.replace(/["'`]/g, '') },
+        { name: 'Without spaces', value: displayName.replace(/\s+/g, '') },
+        { name: 'Without quotes & spaces', value: displayName.replace(/["'`\s]/g, '') }
+      ];
+      
+      for (const variation of variations) {
+        if (variation.value) {
+          const match = await matchesPattern(pattern, variation.value.toLowerCase());
+          testResults.push({
+            type: variation.name,
+            value: variation.value,
+            tested: variation.value.toLowerCase(),
+            result: match
+          });
+          if (match) overallBanned = true;
+        }
+      }
+    }
+    
+    // Format results
+    let response = `<b>User Ban Test Results</b>\n\n`;
+    response += `<b>Pattern:</b> <code>${pattern}</code>\n`;
+    response += `<b>Pattern Type:</b> ${patternObj.regex.source ? 'Regex' : pattern.includes('*') || pattern.includes('?') ? 'Wildcard' : 'Simple Text'}\n\n`;
+    
+    if (username) {
+      response += `<b>Username:</b> @${username}\n`;
+    }
+    if (displayName) {
+      response += `<b>Display Name:</b> "${displayName}"\n`;
+    }
+    response += `\n<b>Test Results:</b>\n`;
+    
+    if (testResults.length === 0) {
+      response += `No username or display name provided to test.\n\n`;
+    } else {
+      for (const test of testResults) {
+        const status = test.result ? 'MATCH' : 'no match';
+        const icon = test.result ? 'BANNED' : 'OK';
+        response += `• ${test.type}: "${test.value}" → <code>${test.tested}</code> → <b>${status}</b>\n`;
+      }
+      response += `\n`;
+    }
+    
+    // Overall result
+    const finalResult = overallBanned ? 'NOT OK - USER WOULD BE BANNED' : 'OK - USER ALLOWED';
+    const resultIcon = overallBanned ? 'BANNED' : 'ALLOWED';
+    response += `<b>Final Result: ${finalResult}</b>\n`;
+    
+    if (overallBanned) {
+      const matchedTests = testResults.filter(t => t.result);
+      response += `\nBanned because: ${matchedTests.map(t => t.type.toLowerCase()).join(', ')} matched the pattern.`;
+    }
+    
+    console.log(`[TESTUSER] Result: ${resultIcon} - Pattern "${pattern}" vs user data`);
+    return ctx.reply(response, { parse_mode: 'HTML' });
+    
+  } catch (err) {
+    console.error(`[TESTUSER] Error:`, err);
+    return ctx.reply(`Error testing user: ${err.message}`);
+  }
+});
+
 // Command to show menu directly
 bot.command('menu', async (ctx) => {
   if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) {
@@ -1626,6 +1760,7 @@ bot.command('help', async (ctx) => {
     `• /setaction <ban|kick> - Set action for matches\n` +
     `• /chatinfo - Show information about current chat\n` +
     `• /testpattern <pattern> <string> - Test a pattern\n` +
+    `• /testuser <pattern> <username> [first] [last] - Test a pattern against a name\n` +
     `• /hits [pattern] - Show hit statistics\n` +
     `• /cancel - Cancel current operation\n\n` +
 
@@ -1633,6 +1768,10 @@ bot.command('help', async (ctx) => {
     `• Simple text: "spam" (substring match)\n` +
     `• Wildcards: "spam*", "*bad*", "test?"\n` +
     `• Regex: "/^bad.*user$/i"\n\n` +
+
+    `Testing Commands:\n` +
+    `• /testpattern - Test if a pattern matches a string\n` +
+    `• /testuser - Simulate full check (be sure to test any obvious variations)\n\n` +
 
     `Features:\n` +
     `• Group-specific pattern management\n` +
