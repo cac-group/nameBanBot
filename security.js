@@ -17,24 +17,24 @@ export function compileSafeRegex(patternStr) {
     if (lastSlash > 0) {
       const pattern = patternStr.slice(1, lastSlash);
       const flags = patternStr.slice(lastSlash + 1);
-      
+
       // Sanitize flags - only allow safe flags
       const safeFlags = flags.replace(/[^gimsu]/g, '');
-      
+
       try {
         // Compile and test the regex
         const regex = new RegExp(pattern, safeFlags);
-        
+
         // Quick test to ensure regex doesn't crash
         'test'.match(regex);
-        
+
         return regex;
       } catch (err) {
         throw new Error(`Invalid regex pattern: ${err.message}`);
       }
     }
   }
-  
+
   // Handle wildcard patterns or plain text
   if (patternStr.includes('*') || patternStr.includes('?')) {
     // Escape regex special characters except * and ?
@@ -42,10 +42,10 @@ export function compileSafeRegex(patternStr) {
       .replace(/[.+^${}()|[\]\\]/g, '\\$&')
       .replace(/\*/g, '.*')
       .replace(/\?/g, '.');
-    
+
     return new RegExp(escaped, 'i');
   }
-  
+
   // Plain text - escape all special characters
   const escaped = patternStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(escaped, 'i');
@@ -61,27 +61,27 @@ export function validatePattern(pattern) {
   if (typeof pattern !== 'string') {
     throw new Error('Pattern must be a string');
   }
-  
+
   // Remove control characters
   // eslint-disable-next-line no-control-regex
   const cleaned = pattern.replace(/[\x00-\x1F\x7F]/g, '');
-  
+
   // Check maximum length
   if (cleaned.length > 500) {
     throw new Error('Pattern too long (max 500 characters)');
   }
-  
+
   if (cleaned.length === 0) {
     throw new Error('Pattern cannot be empty');
   }
-  
+
   // Test regex compilation to catch syntax errors early
   try {
     compileSafeRegex(cleaned);
   } catch (err) {
     throw new Error(`Pattern validation failed: ${err.message}`);
   }
-  
+
   return cleaned;
 }
 
@@ -97,7 +97,7 @@ export function testPatternSafely(regex, testString, timeoutMs = 100) {
     const timeout = setTimeout(() => {
       reject(new Error('Pattern matching timeout'));
     }, timeoutMs);
-    
+
     try {
       const result = regex.test(testString);
       clearTimeout(timeout);
@@ -119,7 +119,7 @@ export async function matchesPattern(pattern, testString) {
   try {
     // Compile the pattern safely
     const regex = compileSafeRegex(pattern);
-    
+
     // Test with timeout protection
     return await testPatternSafely(regex, testString);
   } catch (err) {
@@ -151,10 +151,10 @@ export function validatePatterns(patterns) {
   if (!Array.isArray(patterns)) {
     throw new Error('Patterns must be an array');
   }
-  
+
   const validatedPatterns = [];
   const errors = [];
-  
+
   for (let i = 0; i < patterns.length; i++) {
     try {
       const patternObj = createPatternObject(patterns[i]);
@@ -163,7 +163,7 @@ export function validatePatterns(patterns) {
       errors.push({ index: i, pattern: patterns[i], error: err.message });
     }
   }
-  
+
   return {
     valid: validatedPatterns,
     errors: errors

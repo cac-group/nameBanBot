@@ -10,7 +10,7 @@
     "lint:fix": "eslint . --fix",
     "audit": "yarn audit --level moderate",
     "preversion": "yarn lint && yarn audit",
-    "test": "uvu tests"
+    "test": "NODE_ENV=test uvu tests"
   },
   "dependencies": {
     "dotenv": "^16.5.0",

@@ -1825,8 +1825,16 @@ process.once('SIGTERM', () => cleanup('SIGTERM'));
 process.once('SIGUSR2', () => cleanup('SIGUSR2'));
 
 // Start the bot
-console.log(`[INIT] Starting Telegram Ban Bot...`);
-startup();
+// Only start the bot if not in test mode
+if (process.env.NODE_ENV !== "test" && !process.argv.includes("--test")) {
+  startup();
+} else {
+  console.log(`[TEST] Bot loaded in test mode - not starting`);
+}
 
 // Export functions for testing
-export { incrementHitCounter, getHitStatsForGroup };
+export { 
+  incrementHitCounter, 
+  getHitStatsForGroup,
+  getHitStatsForPattern
+};
