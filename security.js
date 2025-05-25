@@ -152,9 +152,11 @@ export async function matchesPattern(pattern, testString) {
     
     if (hasControlChars) {
       // Only allow control chars if followed by log markers like [INFO], [DEBUG], etc.
+      // eslint-disable-next-line no-control-regex
       if (/[\x00-\x1F\x7F]\s*\[(?:INFO|DEBUG|ERROR|WARN|LOG)\]/.test(testString)) {
         // This looks like genuine log content - allow matching the part before control chars
         const regex = compileSafeRegex(pattern);
+        // eslint-disable-next-line no-control-regex
         const cleanPart = testString.split(/[\x00-\x1F\x7F]/)[0];
         return cleanPart && regex.test(cleanPart);
       }
