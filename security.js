@@ -147,13 +147,35 @@ export async function matchesPattern(pattern, testString) {
       return false;
     }
     
-    // Handle control characters based on pattern type
+    // Check for control characters
     // eslint-disable-next-line no-control-regex
     const hasControlChars = /[\x00-\x1F\x7F]/.test(testString);
     
     if (hasControlChars) {
-      // For regex patterns that should match across newlines, allow control chars
-      if (pattern.startsWith('/') && !pattern.includes('
+      // Special case: allow control chars if they appear AFTER a valid match
+      // Example: "solana spin\n[INFO]..." should match "solana"
+      const regex = compileSafeRegex(pattern);
+      const cleanPart = testString.split(/[\x00-\x1F\x7F]/)[0]; // Get part before first control char
+      
+      if (cleanPart && regex.test(cleanPart)) {
+        // The pattern matches the clean part before control characters
+        return true;
+      }
+      
+      // Otherwise reject strings with control characters
+      return false;
+    }
+    
+    // Compile the pattern safely
+    const regex = compileSafeRegex(pattern);
+    
+    // Test with timeout protection
+    return await testPatternSafely(regex, testString);
+  } catch (err) {
+    console.warn(`Pattern matching error for "${pattern}": ${err.message}`);
+    return false;
+  }
+}
 
 /**
  * Create a safe regex object with metadata
