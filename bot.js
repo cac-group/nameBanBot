@@ -1668,7 +1668,6 @@ bot.command('testuser', async (ctx) => {
     } else {
       for (const test of testResults) {
         const status = test.result ? 'MATCH' : 'no match';
-        const icon = test.result ? 'BANNED' : 'OK';
         response += `• ${test.type}: "${test.value}" → <code>${test.tested}</code> → <b>${status}</b>\n`;
       }
       response += `\n`;
@@ -1676,7 +1675,6 @@ bot.command('testuser', async (ctx) => {
     
     // Overall result
     const finalResult = overallBanned ? 'NOT OK - USER WOULD BE BANNED' : 'OK - USER ALLOWED';
-    const resultIcon = overallBanned ? 'BANNED' : 'ALLOWED';
     response += `<b>Final Result: ${finalResult}</b>\n`;
     
     if (overallBanned) {
@@ -1684,7 +1682,7 @@ bot.command('testuser', async (ctx) => {
       response += `\nBanned because: ${matchedTests.map(t => t.type.toLowerCase()).join(', ')} matched the pattern.`;
     }
     
-    console.log(`[TESTUSER] Result: ${resultIcon} - Pattern "${pattern}" vs user data`);
+    console.log(`[TESTUSER] Result: ${finalResult} - Pattern "${pattern}" vs user data`);
     return ctx.reply(response, { parse_mode: 'HTML' });
     
   } catch (err) {
