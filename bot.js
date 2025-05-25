@@ -1,4 +1,4 @@
-// bot.js - Fixed imports
+// bot.js - Updated with accurate help text and no emojis
 
 import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
@@ -219,8 +219,8 @@ async function isBanned(username, firstName, lastName, groupId) {
       if (username) {
         const usernameMatch = await matchesPattern(pattern.raw, username.toLowerCase());
         if (usernameMatch) {
-          incrementHitCounter(groupId, pattern.raw); // <--- ADD
-          console.log(`[BAN_CHECK] ✅ BANNED - Username "${username}" matched pattern "${pattern.raw}"`);
+          incrementHitCounter(groupId, pattern.raw);
+          console.log(`[BAN_CHECK] BANNED - Username "${username}" matched pattern "${pattern.raw}"`);
           return true;
         }
       }
@@ -239,8 +239,8 @@ async function isBanned(username, firstName, lastName, groupId) {
       for (const variation of variations) {
         const nameMatch = await matchesPattern(pattern.raw, variation.toLowerCase());
         if (nameMatch) {
-          incrementHitCounter(groupId, pattern.raw); // <--- ADD
-          console.log(`[BAN_CHECK] ✅ BANNED - Display name "${variation}" matched pattern "${pattern.raw}"`);
+          incrementHitCounter(groupId, pattern.raw);
+          console.log(`[BAN_CHECK] BANNED - Display name "${variation}" matched pattern "${pattern.raw}"`);
           return true;
         }
       }
@@ -295,7 +295,7 @@ async function loadGroupPatterns(groupId) {
         // Use security module to validate and create pattern objects
         const patternObj = createPatternObject(pt);
         validatedPatterns.push(patternObj);
-        console.log(`[LOAD] ✅ Pattern ${i + 1}: "${pt}" - validated`);
+        console.log(`[LOAD] Pattern ${i + 1}: "${pt}" - validated`);
         
         // Safety limit
         if (validatedPatterns.length >= 100) {
@@ -303,7 +303,7 @@ async function loadGroupPatterns(groupId) {
           break;
         }
       } catch (err) {
-        console.warn(`[LOAD] ❌ Pattern ${i + 1}: "${pt}" - skipped: ${err.message}`);
+        console.warn(`[LOAD] Pattern ${i + 1}: "${pt}" - skipped: ${err.message}`);
       }
     }
     
@@ -328,9 +328,9 @@ async function saveGroupPatterns(groupId, patterns) {
   try {
     const filePath = await getGroupPatternFilePath(groupId);
     await fs.writeFile(filePath, content);
-    console.log(`[SAVE] ✅ Successfully saved patterns to ${filePath}`);
+    console.log(`[SAVE] Successfully saved patterns to ${filePath}`);
   } catch (err) {
-    console.error(`[SAVE] ❌ Error writing patterns for group ${groupId}:`, err);
+    console.error(`[SAVE] Error writing patterns for group ${groupId}:`, err);
   }
 }
 
@@ -398,10 +398,10 @@ async function saveSettings() {
   
   try {
     await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2));
-    console.log(`[SETTINGS] ✅ Settings saved successfully`);
+    console.log(`[SETTINGS] Settings saved successfully`);
     return true;
   } catch (err) {
-    console.error(`[SETTINGS] ❌ Error writing settings:`, err);
+    console.error(`[SETTINGS] Error writing settings:`, err);
     return false;
   }
 }
@@ -470,10 +470,10 @@ async function takePunishmentAction(ctx, userId, username, chatId) {
     }
     const message = getRandomMessage(userId, isBan);
     await ctx.reply(message);
-    console.log(`[PUNISH] ✅ ${isBan ? 'Banned' : 'Kicked'} user ${userId} successfully`);
+    console.log(`[PUNISH] ${isBan ? 'Banned' : 'Kicked'} user ${userId} successfully`);
     return true;
   } catch (error) {
-    console.error(`[PUNISH] ❌ Failed to ${isBan ? 'ban' : 'kick'} user ${userId}:`, error);
+    console.error(`[PUNISH] Failed to ${isBan ? 'ban' : 'kick'} user ${userId}:`, error);
     return false;
   }
 }
@@ -575,7 +575,7 @@ function monitorNewUser(chatId, user) {
         const action = getGroupAction(chatId);
         const isBan = action === 'ban';
         
-        console.log(`[MONITOR] 🚫 User ${user.id} matched pattern - taking action: ${action.toUpperCase()}`);
+        console.log(`[MONITOR] User ${user.id} matched pattern - taking action: ${action.toUpperCase()}`);
         
         if (isBan) {
           await bot.telegram.banChatMember(chatId, user.id);
@@ -644,17 +644,17 @@ async function showMainMenu(ctx) {
   const patterns = groupPatterns.get(selectedGroupId) || [];
   const groupAction = getGroupAction(selectedGroupId);
 
-  let text = `🛡️ <b>Admin Menu</b>\n`;
+  let text = `<b>Admin Menu</b>\n`;
   
   if (isGlobalAdmin) {
-    text += `👑 <b>Global Admin Access</b>\n`;
+    text += `<b>Global Admin Access</b>\n`;
   } else {
-    text += `👮 <b>Group Admin Access</b>\n`;
+    text += `<b>Group Admin Access</b>\n`;
   }
   
-  text += `📍 Selected Group: ${selectedGroupId}\n`;
-  text += `📋 Patterns: ${patterns.length}/100\n`;
-  text += `⚔️ Action: ${groupAction.toUpperCase()}\n\n`;
+  text += `Selected Group: ${selectedGroupId}\n`;
+  text += `Patterns: ${patterns.length}/100\n`;
+  text += `Action: ${groupAction.toUpperCase()}\n\n`;
   text += `Use the buttons below to manage filters.`;
 
   // Create group selection buttons (only for groups user can manage)
@@ -662,7 +662,7 @@ async function showMainMenu(ctx) {
   
   if (manageableGroups.length > 1) {
     const groupButtons = manageableGroups.map(groupId => ({
-      text: `${groupId === selectedGroupId ? '✅ ' : ''}Group ${groupId} (${getGroupAction(groupId).toUpperCase()})`,
+      text: `${groupId === selectedGroupId ? 'Selected: ' : ''}Group ${groupId} (${getGroupAction(groupId).toUpperCase()})`,
       callback_data: `select_group_${groupId}`
     }));
 
@@ -677,16 +677,16 @@ async function showMainMenu(ctx) {
   // Add management buttons
   keyboard.reply_markup.inline_keyboard.push(
     [
-      { text: '➕ Add Filter', callback_data: 'menu_addFilter' },
-      { text: '➖ Remove Filter', callback_data: 'menu_removeFilter' }
+      { text: 'Add Filter', callback_data: 'menu_addFilter' },
+      { text: 'Remove Filter', callback_data: 'menu_removeFilter' }
     ],
     [
-      { text: '📋 List Filters', callback_data: 'menu_listFilters' },
-      { text: '📥 Browse & Copy', callback_data: 'menu_browsePatterns' }
+      { text: 'List Filters', callback_data: 'menu_listFilters' },
+      { text: 'Browse & Copy', callback_data: 'menu_browsePatterns' }
     ],
     [
-      { text: `⚔️ Action: ${groupAction.toUpperCase()}`, callback_data: 'menu_toggleAction' },
-      { text: '❓ Pattern Help', callback_data: 'menu_patternHelp' }
+      { text: `Action: ${groupAction.toUpperCase()}`, callback_data: 'menu_toggleAction' },
+      { text: 'Pattern Help', callback_data: 'menu_patternHelp' }
     ]
   );
 
@@ -731,18 +731,18 @@ async function showPatternBrowsingMenu(ctx) {
   
   if (allPatterns.size === 0) {
     await showOrEditMenu(ctx, 
-      `📥 <b>Browse & Copy Patterns</b>\n\nNo patterns found in any groups.`, 
+      `<b>Browse & Copy Patterns</b>\n\nNo patterns found in any groups.`, 
       {
         parse_mode: 'HTML',
         reply_markup: { 
-          inline_keyboard: [[{ text: '⬅️ Back to Menu', callback_data: 'menu_back' }]] 
+          inline_keyboard: [[{ text: 'Back to Menu', callback_data: 'menu_back' }]] 
         }
       }
     );
     return;
   }
   
-  let text = `📥 <b>Browse & Copy Patterns</b>\n`;
+  let text = `<b>Browse & Copy Patterns</b>\n`;
   text += `Your Selected Group: ${currentGroupId}\n\n`;
   text += `Select any group to view and copy patterns:\n\n`;
   
@@ -751,7 +751,7 @@ async function showPatternBrowsingMenu(ctx) {
   // Add buttons for ALL groups that have patterns (including current group for viewing)
   for (const [groupId, patterns] of allPatterns) {
     const buttonText = groupId === currentGroupId 
-      ? `📍 Group ${groupId} (${patterns.length} patterns) - YOUR GROUP`
+      ? `Group ${groupId} (${patterns.length} patterns) - YOUR GROUP`
       : `Group ${groupId} (${patterns.length} patterns)`;
     
     keyboard.reply_markup.inline_keyboard.push([{
@@ -761,7 +761,7 @@ async function showPatternBrowsingMenu(ctx) {
     
     // Add sample patterns to the text
     if (groupId === currentGroupId) {
-      text += `<b>📍 Group ${groupId} (Your Group):</b> ${patterns.length} patterns\n`;
+      text += `<b>Group ${groupId} (Your Group):</b> ${patterns.length} patterns\n`;
     } else {
       text += `<b>Group ${groupId}:</b> ${patterns.length} patterns\n`;
     }
@@ -771,11 +771,11 @@ async function showPatternBrowsingMenu(ctx) {
   
   // If no other groups have patterns, show a note
   if (allPatterns.size === 1 && allPatterns.has(currentGroupId)) {
-    text += `<i>💡 Only your group has patterns. Other groups will appear here once they add patterns.</i>\n\n`;
+    text += `<i>Only your group has patterns. Other groups will appear here once they add patterns.</i>\n\n`;
   }
   
   keyboard.reply_markup.inline_keyboard.push([
-    { text: '⬅️ Back to Menu', callback_data: 'menu_back' }
+    { text: 'Back to Menu', callback_data: 'menu_back' }
   ]);
   
   await showOrEditMenu(ctx, text, {
@@ -795,11 +795,11 @@ async function showGroupPatternsForCopy(ctx, sourceGroupId) {
   
   if (sourcePatterns.length === 0) {
     await showOrEditMenu(ctx, 
-      `📥 <b>Group ${sourceGroupId} Patterns</b>\n\nNo patterns found in this group.`, 
+      `<b>Group ${sourceGroupId} Patterns</b>\n\nNo patterns found in this group.`, 
       {
         parse_mode: 'HTML',
         reply_markup: { 
-          inline_keyboard: [[{ text: '⬅️ Back', callback_data: 'menu_browsePatterns' }]] 
+          inline_keyboard: [[{ text: 'Back', callback_data: 'menu_browsePatterns' }]] 
         }
       }
     );
@@ -809,14 +809,14 @@ async function showGroupPatternsForCopy(ctx, sourceGroupId) {
   const isOwnGroup = sourceGroupId === targetGroupId;
   const canManageTarget = canManageGroup(adminId, targetGroupId);
   
-  let text = `📥 <b>Group ${sourceGroupId} Patterns</b>\n`;
+  let text = `<b>Group ${sourceGroupId} Patterns</b>\n`;
   
   if (isOwnGroup) {
-    text += `📍 <b>This is your selected group</b>\n\n`;
+    text += `<b>This is your selected group</b>\n\n`;
   } else {
-    text += `To: Group ${targetGroupId} ${canManageTarget ? '✅' : '❌'}\n\n`;
+    text += `To: Group ${targetGroupId} ${canManageTarget ? 'OK' : 'NO ACCESS'}\n\n`;
     if (!canManageTarget) {
-      text += `⚠️ <b>You cannot copy to Group ${targetGroupId}</b>\n`;
+      text += `<b>You cannot copy to Group ${targetGroupId}</b>\n`;
       text += `You can only view these patterns.\n\n`;
     }
   }
@@ -834,17 +834,17 @@ async function showGroupPatternsForCopy(ctx, sourceGroupId) {
   if (!isOwnGroup && canManageTarget) {
     text += `\nChoose what to copy:`;
     keyboard.reply_markup.inline_keyboard.push([
-      { text: '📋 Copy All', callback_data: `copy_all_${sourceGroupId}` },
-      { text: '🎯 Select Specific', callback_data: `copy_select_${sourceGroupId}` }
+      { text: 'Copy All', callback_data: `copy_all_${sourceGroupId}` },
+      { text: 'Select Specific', callback_data: `copy_select_${sourceGroupId}` }
     ]);
   } else if (isOwnGroup) {
-    text += `\n💡 <i>This is your group. Use the main menu to manage these patterns.</i>`;
+    text += `\n<i>This is your group. Use the main menu to manage these patterns.</i>`;
   } else {
-    text += `\n💡 <i>You can view these patterns but cannot copy them to Group ${targetGroupId}.</i>`;
+    text += `\n<i>You can view these patterns but cannot copy them to Group ${targetGroupId}.</i>`;
   }
   
   keyboard.reply_markup.inline_keyboard.push([
-    { text: '⬅️ Back to Browse', callback_data: 'menu_browsePatterns' }
+    { text: 'Back to Browse', callback_data: 'menu_browsePatterns' }
   ]);
   
   await showOrEditMenu(ctx, text, {
@@ -918,19 +918,20 @@ async function promptForPattern(ctx, actionLabel) {
   const groupId = session.selectedGroupId;
 
   const promptText = 
-    `✨ <b>Add Pattern for Group ${groupId}</b> ✨\n\n` +
+    `<b>Add Pattern for Group ${groupId}</b>\n\n` +
     
-    `<b>📝 Pattern Types:</b>\n\n` +
+    `<b>Pattern Types:</b>\n\n` +
     
-    `<b>1. Simple Text</b> - Case-insensitive match\n` +
-    `   • <code>spam</code> matches "SPAM", "Spam", "spam"\n\n` +
+    `<b>1. Simple Text</b> - Case-insensitive substring match\n` +
+    `   • <code>spam</code> matches "SPAM", "Spam", "spammer"\n\n` +
     
     `<b>2. Wildcards</b>\n` +
     `   • <code>*</code> = any characters\n` +
     `   • <code>?</code> = single character\n` +
-    `   • <code>spam*</code> matches "spam123", "spammer", etc.\n` +
-    `   • <code>*bot*</code> matches "testbot", "bot_user", etc.\n` +
-    `   • <code>test?</code> matches "test1", "testa", etc.\n\n` +
+    `   • <code>spam*</code> matches "spam", "spammer", "spam123"\n` +
+    `   • <code>*bot</code> matches "mybot", "testbot", "123bot"\n` +
+    `   • <code>*bad*</code> matches "baduser", "this_is_bad"\n` +
+    `   • <code>test?</code> matches "test1", "testa", "tests"\n\n` +
     
     `<b>3. Regular Expressions</b> - Advanced patterns\n` +
     `   • Format: <code>/pattern/flags</code>\n` +
@@ -938,10 +939,10 @@ async function promptForPattern(ctx, actionLabel) {
     `   • <code>/\\d{5,}/</code> 5+ digits in a row\n` +
     `   • <code>/ch[!1i]ld/i</code> "child", "ch!ld", "ch1ld"\n\n` +
     
-    `<b>💡 Examples:</b>\n` +
-    `• <code>ranger</code> - blocks "ranger"\n` +
-    `• <code>*porn*</code> - blocks anything with "porn"\n` +
-    `• <code>/❤.*ch.ld.*p.rn/i</code> - blocks heart+variations\n\n` +
+    `<b>Examples:</b>\n` +
+    `• <code>ranger</code> - blocks substring "ranger"\n` +
+    `• <code>*porn*</code> - blocks anything containing "porn"\n` +
+    `• <code>/heart.*ch.ld.*p.rn/i</code> - blocks heart+variations\n\n` +
     
     `Send your pattern or /cancel to abort.`;
 
@@ -1005,7 +1006,7 @@ bot.on('text', async (ctx, next) => {
           patterns.push(patternObj);
           groupPatterns.set(groupId, patterns);
           await saveGroupPatterns(groupId, patterns);
-          console.log(`[ADMIN_TEXT] ✅ Added pattern "${patternObj.raw}" to group ${groupId}`);
+          console.log(`[ADMIN_TEXT] Added pattern "${patternObj.raw}" to group ${groupId}`);
           await ctx.reply(`Filter "${patternObj.raw}" added to Group ${groupId}.`);
         }
           } catch (e) {
@@ -1019,7 +1020,7 @@ bot.on('text', async (ctx, next) => {
         patterns.splice(index, 1);
         groupPatterns.set(groupId, patterns);
         await saveGroupPatterns(groupId, patterns);
-        console.log(`[ADMIN_TEXT] ✅ Removed pattern "${input}" from group ${groupId}`);
+        console.log(`[ADMIN_TEXT] Removed pattern "${input}" from group ${groupId}`);
         await ctx.reply(`Filter "${input}" removed from Group ${groupId}.`);
       } else {
         console.log(`[ADMIN_TEXT] Pattern not found: "${input}"`);
@@ -1052,9 +1053,9 @@ bot.on('text', async (ctx, next) => {
       const result = await copyPatternsToGroup(sourceGroupId, groupId, patternIndices);
       
       if (result.success) {
-        await ctx.reply(`✅ ${result.message}`);
+        await ctx.reply(`${result.message}`);
       } else {
-        await ctx.reply(`❌ ${result.message}`);
+        await ctx.reply(`${result.message}`);
       }
     }
 
@@ -1071,7 +1072,7 @@ bot.on('text', async (ctx, next) => {
   }
 });
 
-// Enhanced callback handler with browsing functionality (FIXED - no duplicates)
+// Callback handler
 bot.on('callback_query', async (ctx) => {
   if (ctx.chat?.type !== 'private' || !(await isAuthorized(ctx))) {
     return ctx.answerCbQuery('Not authorized.');
@@ -1133,7 +1134,7 @@ bot.on('callback_query', async (ctx) => {
     if (result.success) {
       await ctx.answerCbQuery(`Success! ${result.message}`);
       // Update the browsing menu to show the result
-      let resultText = `✅ <b>Copy Complete!</b>\n\n`;
+      let resultText = `<b>Copy Complete!</b>\n\n`;
       resultText += `From: Group ${sourceGroupId}\n`;
       resultText += `To: Group ${targetGroupId}\n\n`;
       resultText += `${result.message}\n\n`;
@@ -1142,7 +1143,7 @@ bot.on('callback_query', async (ctx) => {
       await showOrEditMenu(ctx, resultText, {
         parse_mode: 'HTML',
         reply_markup: {
-          inline_keyboard: [[{ text: '🏠 Back to Main Menu', callback_data: 'menu_back' }]]
+          inline_keyboard: [[{ text: 'Back to Main Menu', callback_data: 'menu_back' }]]
         }
       });
     } else {
@@ -1167,7 +1168,7 @@ bot.on('callback_query', async (ctx) => {
     adminSessions.set(adminId, session);
     
     const sourcePatterns = groupPatterns.get(sourceGroupId) || [];
-    let text = `🎯 <b>Select Patterns to Copy</b>\n\n`;
+    let text = `<b>Select Patterns to Copy</b>\n\n`;
     text += `From: Group ${sourceGroupId}\n`;
     text += `To: Group ${targetGroupId}\n\n`;
     text += `Send pattern numbers separated by commas (e.g., "1,3,5") or "all" for all patterns:\n\n`;
@@ -1179,7 +1180,7 @@ bot.on('callback_query', async (ctx) => {
     await showOrEditMenu(ctx, text, {
       parse_mode: 'HTML',
       reply_markup: {
-        inline_keyboard: [[{ text: '❌ Cancel', callback_data: 'menu_browsePatterns' }]]
+        inline_keyboard: [[{ text: 'Cancel', callback_data: 'menu_browsePatterns' }]]
       }
     });
     return;
@@ -1240,44 +1241,53 @@ bot.on('callback_query', async (ctx) => {
   } else if (data === 'menu_patternHelp') {
     console.log(`[CALLBACK] Admin ${adminId} requested pattern help`);
     const helpText = 
-      `✨ <b>Pattern Types Guide</b> ✨\n\n` +
+      `<b>Pattern Types Guide</b>\n\n` +
       
-      `<b>🔤 Simple Text</b>\n` +
-      `Case-insensitive match\n` +
+      `<b>Simple Text</b>\n` +
+      `Case-insensitive substring match\n` +
       `Example: <code>spam</code>\n` +
-      `Matches: "SPAM", "Spam", "spam123", etc.\n\n` +
+      `Matches: "SPAM", "Spam", "spammer", "this spam here", etc.\n\n` +
       
-      `<b>⭐ Wildcards</b>\n` +
+      `<b>Wildcards</b>\n` +
       `• <code>*</code> = zero or more characters\n` +
       `• <code>?</code> = exactly one character\n\n` +
       `Examples:\n` +
-      `• <code>spam*</code> → "spam", "spammer", "spam123"\n` +
-      `• <code>*bot</code> → "mybot", "testbot", "123bot"\n` +
-      `• <code>*bad*</code> → "baduser", "this_is_bad"\n` +
-      `• <code>test?</code> → "test1", "testa", "tests"\n\n` +
+      `• <code>spam*</code> → starts with "spam": "spam", "spammer", "spam123"\n` +
+      `• <code>*bot</code> → ends with "bot": "mybot", "testbot", "123bot"\n` +
+      `• <code>*bad*</code> → contains "bad": "baduser", "this_is_bad"\n` +
+      `• <code>test?</code> → "test" + one char: "test1", "testa", "tests"\n\n` +
       
-      `<b>🔧 Regular Expressions</b>\n` +
+      `<b>Regular Expressions</b>\n` +
       `Format: <code>/pattern/flags</code>\n\n` +
       `Useful flags:\n` +
       `• <code>i</code> = case-insensitive\n` +
-      `• <code>g</code> = global match\n\n` +
+      `• <code>g</code> = global match\n` +
+      `• <code>m</code> = multiline\n` +
+      `• <code>s</code> = dotall\n` +
+      `• <code>u</code> = unicode\n\n` +
       `Examples:\n` +
       `• <code>/^spam/i</code> → starts with "spam"\n` +
       `• <code>/user$/i</code> → ends with "user"\n` +
-      `• <code>/\\d{5,}/</code> → 5+ digits\n` +
+      `• <code>/\\d{5,}/</code> → 5 or more digits\n` +
       `• <code>/ch[!1i]ld/i</code> → "child", "ch!ld", "ch1ld"\n` +
-      `• <code>/❤.*p.rn/i</code> → heart + porn variations\n\n` +
+      `• <code>/heart.*p.rn/i</code> → heart + porn variations\n\n` +
       
-      `<b>💡 Tips:</b>\n` +
+      `<b>What Gets Checked:</b>\n` +
+      `• Username (if present)\n` +
+      `• Display name (first + last name)\n` +
+      `• Display name without quotes/spaces\n` +
+      `• All converted to lowercase\n\n` +
+      
+      `<b>Tips:</b>\n` +
       `• Test patterns with /testpattern\n` +
       `• Start simple, then get complex\n` +
-      `• Patterns are checked against usernames AND display names\n` +
+      `• Simple text matches as substring\n` +
       `• Use Browse & Copy to share patterns between groups`;
 
     await ctx.editMessageText(helpText, {
       parse_mode: 'HTML',
       reply_markup: { 
-        inline_keyboard: [[{ text: '⬅️ Back to Menu', callback_data: 'menu_back' }]] 
+        inline_keyboard: [[{ text: 'Back to Menu', callback_data: 'menu_back' }]] 
       }
     });
   } else if (data === 'menu_back') {
@@ -1338,11 +1348,11 @@ bot.command('addFilter', async (ctx) => {
     groupPatterns.set(groupId, patterns);
     await saveGroupPatterns(groupId, patterns);
     
-    console.log(`[COMMAND] ✅ Added pattern "${patternObj.raw}" to group ${groupId}`);
-    return ctx.reply(`✅ Added filter: "${patternObj.raw}"`);
+    console.log(`[COMMAND] Added pattern "${patternObj.raw}" to group ${groupId}`);
+    return ctx.reply(`Added filter: "${patternObj.raw}"`);
   } catch (error) {
     console.error(`[COMMAND] addFilter error:`, error);
-    return ctx.reply(`❌ Error: ${error.message}`);
+    return ctx.reply(`Error: ${error.message}`);
   }
 });
 
@@ -1380,7 +1390,7 @@ bot.command('removeFilter', async (ctx) => {
     patterns.splice(index, 1);
     groupPatterns.set(groupId, patterns);
     await saveGroupPatterns(groupId, patterns);
-    console.log(`[COMMAND] ✅ Removed pattern "${pattern}" from group ${groupId}`);
+    console.log(`[COMMAND] Removed pattern "${pattern}" from group ${groupId}`);
     return ctx.reply(`Filter removed: "${pattern}" from Group ${groupId}`);
   } else {
     console.log(`[COMMAND] Pattern not found: "${pattern}" in group ${groupId}`);
@@ -1480,10 +1490,10 @@ bot.command('setaction', async (ctx) => {
     settings.groupActions[groupId] = action;
     const success = await saveSettings();
     if (success) {
-      console.log(`[COMMAND] ✅ Action updated for group ${groupId}: ${action.toUpperCase()}`);
+      console.log(`[COMMAND] Action updated for group ${groupId}: ${action.toUpperCase()}`);
       return ctx.reply(`Action updated to: ${action.toUpperCase()} for this group`);
     } else {
-      console.log(`[COMMAND] ❌ Failed to save settings for group ${groupId}`);
+      console.log(`[COMMAND] Failed to save settings for group ${groupId}`);
       return ctx.reply('Failed to save settings. Check logs for details.');
     }
   } 
@@ -1515,10 +1525,10 @@ bot.command('setaction', async (ctx) => {
     settings.groupActions[groupId] = action;
     const success = await saveSettings();
     if (success) {
-      console.log(`[COMMAND] ✅ Action updated for group ${groupId}: ${action.toUpperCase()}`);
+      console.log(`[COMMAND] Action updated for group ${groupId}: ${action.toUpperCase()}`);
       return ctx.reply(`Action updated to: ${action.toUpperCase()} for Group ${groupId}`);
     } else {
-      console.log(`[COMMAND] ❌ Failed to save settings for group ${groupId}`);
+      console.log(`[COMMAND] Failed to save settings for group ${groupId}`);
       return ctx.reply('Failed to save settings. Check logs for details.');
     }
   }
@@ -1546,6 +1556,138 @@ bot.command('testpattern', async (ctx) => {
   } catch (err) {
     console.error(`[COMMAND] testpattern error:`, err);
     return ctx.reply(`Error testing pattern: ${err.message}`);
+  }
+});
+
+// In-line test - simulate ban checking logic in-app
+bot.command('testuser', async (ctx) => {
+  if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) return;
+  
+  console.log(`[COMMAND] /testuser from admin ${ctx.from.id}: "${ctx.message.text}"`);
+  
+  const parts = ctx.message.text.split(' ');
+  if (parts.length < 3) {
+    console.log(`[COMMAND] testuser usage help requested`);
+    return ctx.reply(
+      `<b>Usage: /testuser &lt;pattern&gt; &lt;username&gt; [first_name] [last_name]</b>\n\n` +
+      `<b>Examples:</b>\n` +
+      `<code>/testuser spam spammer123</code>\n` +
+      `<code>/testuser *bot* testbot</code>\n` +
+      `<code>/testuser evil eviluser "Evil User"</code>\n` +
+      `<code>/testuser /^bad/i badguy "Bad" "Guy"</code>\n\n` +
+      `This simulates the full ban check process including all name variations.`,
+      { parse_mode: 'HTML' }
+    );
+  }
+  
+  const pattern = parts[1];
+  const username = parts[2] || null;
+  
+  // Parse display name - handle quoted strings
+  let remainingParts = parts.slice(3);
+  let firstName = null;
+  let lastName = null;
+  
+  if (remainingParts.length > 0) {
+    const fullName = remainingParts.join(' ');
+    
+    // Try to parse quoted names
+    const quotedMatch = fullName.match(/^"([^"]*)"(?:\s+"([^"]*)")?/);
+    if (quotedMatch) {
+      firstName = quotedMatch[1] || null;
+      lastName = quotedMatch[2] || null;
+    } else {
+      // Split by spaces
+      const nameParts = fullName.split(' ');
+      firstName = nameParts[0] || null;
+      lastName = nameParts.slice(1).join(' ') || null;
+    }
+  }
+  
+  try {
+    // Create a pattern object to validate it
+    const patternObj = createPatternObject(pattern);
+    
+    console.log(`[TESTUSER] Testing pattern "${pattern}" against user: @${username || 'none'}, "${firstName || ''} ${lastName || ''}".trim()`);
+    
+    // Simulate the exact logic from isBanned function
+    let testResults = [];
+    let overallBanned = false;
+    
+    // Test username if provided
+    if (username) {
+      const usernameMatch = await matchesPattern(pattern, username.toLowerCase());
+      testResults.push({
+        type: 'Username',
+        value: username,
+        tested: username.toLowerCase(),
+        result: usernameMatch
+      });
+      if (usernameMatch) overallBanned = true;
+    }
+    
+    // Test display name variations if provided
+    const displayName = [firstName, lastName].filter(Boolean).join(' ');
+    if (displayName) {
+      const variations = [
+        { name: 'Display name', value: displayName },
+        { name: 'Without quotes', value: displayName.replace(/["'`]/g, '') },
+        { name: 'Without spaces', value: displayName.replace(/\s+/g, '') },
+        { name: 'Without quotes & spaces', value: displayName.replace(/["'`\s]/g, '') }
+      ];
+      
+      for (const variation of variations) {
+        if (variation.value) {
+          const match = await matchesPattern(pattern, variation.value.toLowerCase());
+          testResults.push({
+            type: variation.name,
+            value: variation.value,
+            tested: variation.value.toLowerCase(),
+            result: match
+          });
+          if (match) overallBanned = true;
+        }
+      }
+    }
+    
+    // Format results
+    let response = `<b>User Ban Test Results</b>\n\n`;
+    response += `<b>Pattern:</b> <code>${pattern}</code>\n`;
+    response += `<b>Pattern Type:</b> ${patternObj.regex.source ? 'Regex' : pattern.includes('*') || pattern.includes('?') ? 'Wildcard' : 'Simple Text'}\n\n`;
+    
+    if (username) {
+      response += `<b>Username:</b> @${username}\n`;
+    }
+    if (displayName) {
+      response += `<b>Display Name:</b> "${displayName}"\n`;
+    }
+    response += `\n<b>Test Results:</b>\n`;
+    
+    if (testResults.length === 0) {
+      response += `No username or display name provided to test.\n\n`;
+    } else {
+      for (const test of testResults) {
+        const status = test.result ? 'MATCH' : 'no match';
+        response += `• ${test.type}: "${test.value}" → <code>${test.tested}</code> → <b>${status}</b>\n`;
+      }
+      response += `\n`;
+    }
+    
+    // Overall result
+    const finalResult = overallBanned ? 'NOT OK - USER WOULD BE BANNED' : 'OK - USER ALLOWED';
+    response += `<b>Final Result: ${finalResult}</b>\n`;
+    
+    if (overallBanned) {
+      const matchedTests = testResults.filter(t => t.result);
+      response += `\nBanned because: ${matchedTests.map(t => t.type.toLowerCase()).join(', ')} matched the pattern.`;
+    }
+    
+    console.log(`[TESTUSER] Result: ${finalResult} - Pattern "${pattern}" vs user data`);
+    return ctx.reply(response, { parse_mode: 'HTML' });
+    
+  } catch (err) {
+    console.error(`[TESTUSER] Error:`, err);
+    return ctx.reply(`Error testing user: ${err.message}`);
   }
 });
 
@@ -1577,7 +1719,7 @@ bot.command('hits', async (ctx) => {
     if (stats.length === 0) {
       return ctx.reply(`No recorded hits for pattern:\n<code>${patternRaw}</code>`, { parse_mode: 'HTML' });
     }
-    let reply = `📊 Hit counts for pattern <code>${patternRaw}</code>:\n`;
+    let reply = `Hit counts for pattern <code>${patternRaw}</code>:\n`;
     for (const { groupId, count } of stats) {
       reply += `• Group <b>${groupId}</b>: <b>${count}</b> hit(s)\n`;
     }
@@ -1590,7 +1732,7 @@ bot.command('hits', async (ctx) => {
     return ctx.reply(`No pattern hits recorded for this group yet.`);
   }
   const stats = getHitStatsForGroup(groupId, 10);
-  let reply = `📈 <b>Top Pattern Hits in Group ${groupId}</b>:\n`;
+  let reply = `<b>Top Pattern Hits in Group ${groupId}</b>:\n`;
   for (const { pattern, count } of stats) {
     reply += `• <code>${pattern}</code>: <b>${count}</b>\n`;
   }
@@ -1616,18 +1758,25 @@ bot.command('help', async (ctx) => {
     `• /setaction <ban|kick> - Set action for matches\n` +
     `• /chatinfo - Show information about current chat\n` +
     `• /testpattern <pattern> <string> - Test a pattern\n` +
+    `• /testuser <pattern> <username> [first] [last] - Test a pattern against a name\n` +
+    `• /hits [pattern] - Show hit statistics\n` +
     `• /cancel - Cancel current operation\n\n` +
 
     `Pattern Formats:\n` +
-    `• Simple text: "spam"\n` +
-    `• Wildcards: "spam*site", "*bad*user*"\n` +
+    `• Simple text: "spam" (substring match)\n` +
+    `• Wildcards: "spam*", "*bad*", "test?"\n` +
     `• Regex: "/^bad.*user$/i"\n\n` +
+
+    `Testing Commands:\n` +
+    `• /testpattern - Test if a pattern matches a string\n` +
+    `• /testuser - Simulate full check (be sure to test any obvious variations)\n\n` +
 
     `Features:\n` +
     `• Group-specific pattern management\n` +
     `• Browse and copy patterns between groups\n` +
     `• Per-group ban/kick settings\n` +
-    `• Real-time name change monitoring\n\n` +
+    `• Real-time name change monitoring\n` +
+    `• Hit tracking and statistics\n\n` +
 
     `The bot checks user names when they:\n` +
     `1. Join a group\n` +
@@ -1648,9 +1797,9 @@ bot.command('start', async (ctx) => {
   console.log(`[COMMAND] /start from admin ${ctx.from.id}`);
   
   const welcomeText = 
-    `🛡️ <b>Welcome to the Telegram Ban Bot!</b>\n\n` +
+    `<b>Welcome to the Telegram Ban Bot!</b>\n\n` +
     
-    `This bot helps protect your groups by automatically removing users whose names match specific patterns.\n\n` +
+    `This bot removes bot spammers by immediately removing new joiners with names or usernames matching your own specified patterns.\n\n` +
     
     `<b>Quick Start:</b>\n` +
     `1. Use /menu to configure patterns\n` +
@@ -1658,14 +1807,14 @@ bot.command('start', async (ctx) => {
     `3. Add patterns (text, wildcards, or regex)\n` +
     `4. Choose ban or kick action\n\n` +
     
-    `<b>New Features:</b>\n` +
-    `• Browse & copy patterns between groups\n` +
-    `• Per-group settings management\n` +
-    `• Enhanced admin controls\n\n` +
+    `<b>Features:</b>\n` +
+    `• View & copy blocked patterns between groups\n` +
+    `• Per-group settings\n` +
+    `• Hit tracking and statistics\n\n` +
     
     `<b>Pattern Examples:</b>\n` +
-    `• <code>spam</code> - blocks exact text\n` +
-    `• <code>*bot*</code> - blocks anything with "bot"\n` +
+    `• <code>spam</code> - blocks substring "spam"\n` +
+    `• <code>*bot*</code> - blocks anything containing "bot"\n` +
     `• <code>/^evil/i</code> - blocks names starting with "evil"\n\n` +
     
     `Ready to get started?`;
@@ -1737,7 +1886,7 @@ bot.on('new_chat_members', async (ctx) => {
     console.log(`[EVENT] Checking new user: ${user.id} (@${username || 'no_username'}) Name: ${displayName}`);
 
     if (await isBanned(username, firstName, lastName, chatId)) {
-      console.log(`[EVENT] 🚫 New user ${user.id} is banned - taking action`);
+      console.log(`[EVENT] New user ${user.id} is banned - taking action`);
       await takePunishmentAction(ctx, user.id, displayName || username || user.id, chatId);
     } else {
       console.log(`[EVENT] New user ${user.id} passed initial check - starting monitoring`);
@@ -1746,7 +1895,7 @@ bot.on('new_chat_members', async (ctx) => {
   }
 });
 
-// Message handler for banning users
+// Action-taken message handler
 bot.on('message', async (ctx, next) => {
   if (!isChatAllowed(ctx)) return next();
 
@@ -1759,7 +1908,7 @@ bot.on('message', async (ctx, next) => {
   console.log(`[MESSAGE] User ${ctx.from.id} (@${username || 'no_username'}) sending message in chat ${chatId}`);
 
   if (await isBanned(username, firstName, lastName, chatId)) {
-    console.log(`[MESSAGE] 🚫 User ${ctx.from.id} is banned - taking action`);
+    console.log(`[MESSAGE] User ${ctx.from.id} is banned - taking action`);
     await takePunishmentAction(ctx, ctx.from.id, displayName || username || ctx.from.id, chatId);
   } else {
     console.log(`[MESSAGE] User ${ctx.from.id} passed check - allowing message`);
@@ -1791,17 +1940,7 @@ async function startup() {
   })
   .then(() => {
     console.log('\n==============================');
-    console.log('Bot Started');
-    console.log('==============================');
-    console.log(`Loaded patterns for ${groupPatterns.size} groups`);
-    console.log(`Group actions:`, settings.groupActions);
-    console.log(`✅ Security module active`);
-    console.log(`✅ Pattern validation enabled`);
-    console.log(`✅ Regex timeout protection enabled`);
-    console.log(`✅ Enhanced group management enabled`);
-    console.log(`✅ Pattern browsing & copying enabled`);
-    console.log(`✅ Comprehensive logging enabled`);
-    console.log('Bot is running. Press Ctrl+C to stop.');
+    console.log('Bot Running');
     console.log('==============================\n');
   })
   .catch(err => {
