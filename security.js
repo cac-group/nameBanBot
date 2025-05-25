@@ -45,8 +45,8 @@ export function compileSafeRegex(patternStr) {
 
     return new RegExp(escaped, 'i');
   }
-
-  // Plain text - escape all special characters
+  
+  // Plain text - escape all special characters and match as substring
   const escaped = patternStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(escaped, 'i');
 }
@@ -117,11 +117,25 @@ export function testPatternSafely(regex, testString, timeoutMs = 100) {
  */
 export async function matchesPattern(pattern, testString) {
   try {
+    // Return false for invalid inputs
+    if (!testString || typeof testString !== 'string') {
+      return false;
+    }
+    
+    // Filter out control characters from test string
+    // eslint-disable-next-line no-control-regex
+    const cleanTestString = testString.replace(/[\x00-\x1F\x7F]/g, '');
+    
+    // Return false if string becomes empty after cleaning
+    if (!cleanTestString) {
+      return false;
+    }
+    
     // Compile the pattern safely
     const regex = compileSafeRegex(pattern);
 
     // Test with timeout protection
-    return await testPatternSafely(regex, testString);
+    return await testPatternSafely(regex, cleanTestString);
   } catch (err) {
     console.warn(`Pattern matching error for "${pattern}": ${err.message}`);
     return false;
