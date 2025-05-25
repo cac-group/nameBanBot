@@ -1,4 +1,4 @@
-// security.js - Pattern security functions for the Telegram ban bot
+// security.js - Pattern security functions
 
 /**
  * Safe regex compilation with basic protections
@@ -34,15 +34,34 @@ export function compileSafeRegex(patternStr) {
       }
     }
   }
-
-  // Handle wildcard patterns or plain text
+  
+  // Handle wildcard patterns
   if (patternStr.includes('*') || patternStr.includes('?')) {
     // Escape regex special characters except * and ?
-    const escaped = patternStr
-      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*')
-      .replace(/\?/g, '.');
-
+    let escaped = patternStr.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    
+    // Convert wildcards to regex with word boundaries
+    // *word should match "anything ending with word"
+    // word* should match "word followed by anything" 
+    // *word* should match "anything containing word"
+    
+    if (patternStr.startsWith('*') && patternStr.endsWith('*')) {
+      // *word* -> match anywhere (current behavior is correct)
+      escaped = escaped.replace(/\*/g, '.*');
+    } else if (patternStr.startsWith('*')) {
+      // *word -> match ending with word
+      escaped = escaped.replace(/\*/g, '.*') + '$';
+    } else if (patternStr.endsWith('*')) {
+      // word* -> match starting with word  
+      escaped = '^' + escaped.replace(/\*/g, '.*');
+    } else {
+      // no leading/trailing * -> convert normally
+      escaped = escaped.replace(/\*/g, '.*');
+    }
+    
+    // Convert ? to single character
+    escaped = escaped.replace(/\?/g, '.');
+    
     return new RegExp(escaped, 'i');
   }
   
@@ -122,12 +141,9 @@ export async function matchesPattern(pattern, testString) {
       return false;
     }
     
-    // Filter out control characters from test string
+    // Check for control characters in test string - if found, reject match
     // eslint-disable-next-line no-control-regex
-    const cleanTestString = testString.replace(/[\x00-\x1F\x7F]/g, '');
-    
-    // Return false if string becomes empty after cleaning
-    if (!cleanTestString) {
+    if (/[\x00-\x1F\x7F]/.test(testString)) {
       return false;
     }
     
@@ -135,7 +151,7 @@ export async function matchesPattern(pattern, testString) {
     const regex = compileSafeRegex(pattern);
 
     // Test with timeout protection
-    return await testPatternSafely(regex, cleanTestString);
+    return await testPatternSafely(regex, testString);
   } catch (err) {
     console.warn(`Pattern matching error for "${pattern}": ${err.message}`);
     return false;
