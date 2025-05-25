@@ -1827,3 +1827,6 @@ process.once('SIGUSR2', () => cleanup('SIGUSR2'));
 // Start the bot
 console.log(`[INIT] Starting Telegram Ban Bot...`);
 startup();
+
+// Export functions for testing
+export { incrementHitCounter, getHitStatsForGroup };
