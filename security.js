@@ -142,7 +142,6 @@ export async function matchesPattern(pattern, testString) {
     }
     
     // Ignore log-like sequences in brackets [TEXT]
-    // This prevents matching content that looks like log markers
     if (/^\[.*\]$/.test(testString.trim())) {
       return false;
     }
@@ -152,17 +151,15 @@ export async function matchesPattern(pattern, testString) {
     const hasControlChars = /[\x00-\x1F\x7F]/.test(testString);
     
     if (hasControlChars) {
-      // Special case: allow control chars if they appear AFTER a valid match
-      // Example: "solana spin\n[INFO]..." should match "solana"
-      const regex = compileSafeRegex(pattern);
-      const cleanPart = testString.split(/[\x00-\x1F\x7F]/)[0]; // Get part before first control char
-      
-      if (cleanPart && regex.test(cleanPart)) {
-        // The pattern matches the clean part before control characters
-        return true;
+      // Only allow control chars if followed by log markers like [INFO], [DEBUG], etc.
+      if (/[\x00-\x1F\x7F]\s*\[(?:INFO|DEBUG|ERROR|WARN|LOG)\]/.test(testString)) {
+        // This looks like genuine log content - allow matching the part before control chars
+        const regex = compileSafeRegex(pattern);
+        const cleanPart = testString.split(/[\x00-\x1F\x7F]/)[0];
+        return cleanPart && regex.test(cleanPart);
       }
       
-      // Otherwise reject strings with control characters
+      // Otherwise reject all strings with control characters
       return false;
     }
     
