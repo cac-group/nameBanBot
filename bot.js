@@ -1,11 +1,11 @@
-// bot.js - Updated with accurate help text and no emojis
+// bot.js
 
 import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
 import toml from 'toml';
 
-// Import configuration constants
+// config
 import {
   BOT_TOKEN,
   BANNED_PATTERNS_DIR,
@@ -15,11 +15,23 @@ import {
   HIT_COUNTER_FILE
 } from './config/config.js';
 
-// Import security functions
+// security
 import {
   createPatternObject,
   matchesPattern
 } from './security.js';
+
+// management auth
+import {
+  setupAuth,
+  isAuthorized,
+  canManageGroup,
+  getManagedGroups,
+  getUserAuthInfo,
+  refreshAuthCache,
+  forceRefreshAuthCache,
+  getAuthCacheStats
+} from './auth.js';
 
 dotenv.config();
 
@@ -67,8 +79,9 @@ function isChatAllowed(ctx) {
     console.log(`[CHAT_CHECK] Group ${ctx.chat.id} (${chatType}) - Allowed: ${isAllowed}`);
     return isAllowed;
   }
-  console.log(`[CHAT_CHECK] Non-group chat (${chatType}) - Always allowed`);
-  return true;
+
+  console.log(`[CHAT_CHECK] Private chat (${chatType}) not whitelisted user`);
+  return false;
 }
 
 function canManageGroup(userId, groupId) {
@@ -960,23 +973,32 @@ async function promptForPattern(ctx, actionLabel) {
 
 // Text handler
 bot.on('text', async (ctx, next) => {
-  if (ctx.chat.type !== 'private' || !(await isAuthorized(ctx))) return next();
-  
-  console.log(`[ADMIN_TEXT] Received text from admin ${ctx.from.id}: "${ctx.message.text}"`);
-  
+  if (ctx.chat.type !== 'private') {
+    return next();
+  }
+
   const adminId = ctx.from.id;
+
+    if (!(await isAuthorized(ctx, adminSessions))) {
+    console.log(`[ADMIN_TEXT] User ${ctx.from.id} not authorized for private chat`);
+    return;
+  }
+  
+  console.log(`[ADMIN_TEXT] rec msg from ${ctx.from.id}: "${ctx.message.text}"`);
+
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
   const input = ctx.message.text.trim();
 
-  if (input.toLowerCase() === '/cancel') {
-    console.log(`[ADMIN_TEXT] Admin ${adminId} cancelled current action`);
-    session.action = undefined;
-    session.copySourceGroupId = undefined;
-    adminSessions.set(adminId, session);
-    await deleteMenu(ctx, "Action cancelled.");
-    await showMainMenu(ctx);
-    return;
-  }
+if (input.toLowerCase() === '/cancel') {
+  console.log(`[ADMIN_TEXT] ${adminId} cancelled current action`);
+  session.action = undefined;
+  session.copySourceGroupId = undefined;
+  session.menuMessageId = null; // ← Add this line
+  adminSessions.set(adminId, session);
+  await deleteMenu(ctx, "Action cancelled.");
+  await showMainMenu(ctx);
+  return;
+}
 
   if (session.action) {
     const groupId = session.selectedGroupId;
@@ -1074,9 +1096,11 @@ bot.on('text', async (ctx, next) => {
 
 // Callback handler
 bot.on('callback_query', async (ctx) => {
-  if (ctx.chat?.type !== 'private' || !(await isAuthorized(ctx))) {
+  if (ctx.chat?.type !== 'private' || !(await isAuthorized(ctx, adminSessions))) {
+    console.log(`[CALLBACK] User ${ctx.from.id} not authorized`);
     return ctx.answerCbQuery('Not authorized.');
   }
+
 
   console.log(`[CALLBACK] Admin ${ctx.from.id} pressed: ${ctx.callbackQuery.data}`);
   
