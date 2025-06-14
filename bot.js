@@ -68,8 +68,11 @@ const kickMessages = [
   "User {userId} needs to rethink their life choices."
 ];
 
+// Hit counter variables with race condition protection
 let hitCounters = {}; // Structure: { groupId: { pattern: count, ... }, ... }
-
+let saveInProgress = false;
+let pendingSave = false;
+let saveTimeout = null;
 
 // Utility Functions
 function isChatAllowed(ctx) {
@@ -81,24 +84,6 @@ function isChatAllowed(ctx) {
   }
 
   console.log(`[CHAT_CHECK] Private chat (${chatType}) not whitelisted user`);
-  return false;
-}
-
-function canManageGroup(userId, groupId) {
-  // Global admins can manage any group
-  if (WHITELISTED_USER_IDS.includes(userId)) {
-    console.log(`[AUTH] User ${userId} can manage group ${groupId} - global admin`);
-    return true;
-  }
-  
-  // Check session for group-specific authorization
-  const session = adminSessions.get(userId);
-  if (session && session.authorizedGroupId === groupId) {
-    console.log(`[AUTH] User ${userId} can manage group ${groupId} - group admin`);
-    return true;
-  }
-  
-  console.log(`[AUTH] User ${userId} cannot manage group ${groupId}`);
   return false;
 }
 
@@ -138,73 +123,6 @@ async function checkAndCacheGroupAdmin(userId, bot) {
   }
   
   console.log(`[ADMIN_CHECK] User ${userId} is not an admin in any group`);
-  return false;
-}
-
-// auth check
-async function isAuthorized(ctx) {
-  const userId = ctx.from.id;
-  const chatType = ctx.chat.type;
-
-  console.log(`[AUTH] Checking authorization for user ${userId} in ${chatType} chat`);
-
-  // allow only whitelisted groups
-  if (!isChatAllowed(ctx)) {
-    console.log(`[AUTH] Chat not allowed - denied`);
-    return false;
-  }
-
-  // whitelisted - global admin level access
-  if (WHITELISTED_USER_IDS.includes(userId)) {
-    console.log(`[AUTH] User ${userId} authorized via global whitelist`);
-    return true;
-  }
-
-  // group admin - admin of whitelisted group
-  if (chatType === 'group' || chatType === 'supergroup') {
-    const groupId = ctx.chat.id;
-    if (!WHITELISTED_GROUP_IDS.includes(groupId)) {
-      console.log(`[AUTH] Group ${groupId} not whitelisted - denied`);
-      return false;
-    }
-    try {
-      const user = await ctx.getChatMember(userId);
-      if (user.status === 'administrator' || user.status === 'creator') {
-        let session = adminSessions.get(userId) || { chatId: ctx.chat.id };
-        session.authorizedGroupId = groupId;
-        session.isGlobalAdmin = false;
-        adminSessions.set(userId, session);
-        console.log(`[AUTH] User ${userId} is admin in group ${groupId} - authorized`);
-        return true;
-      }
-    } catch (e) {
-      console.error(`[AUTH] Error checking group membership: ${e.message}`);
-      return false;
-    }
-  }
-
-  // allow dm interaction only from approved
-  if (chatType === 'private') {
-    for (const groupId of WHITELISTED_GROUP_IDS) {
-      try {
-        const user = await bot.telegram.getChatMember(groupId, userId);
-        if (user.status === 'administrator' || user.status === 'creator') {
-          let session = adminSessions.get(userId) || { chatId: ctx.chat.id };
-          session.authorizedGroupId = groupId;
-          session.isGlobalAdmin = false;
-          session.selectedGroupId = groupId;
-          adminSessions.set(userId, session);
-          console.log(`[AUTH] User ${userId} is admin in group ${groupId} - authorized for DM`);
-          return true;
-        }
-      } catch {
-        // Not admin in this group
-      }
-    }
-  }
-
-  // deny all other users
-  console.log(`[AUTH] Authorization denied for user ${userId}`);
   return false;
 }
 
@@ -419,24 +337,62 @@ async function saveSettings() {
   }
 }
 
+// Debounced save function to batch multiple increments
+function debouncedSave() {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+  }
+  saveTimeout = setTimeout(() => {
+    saveHitCounters().catch(err => {
+      console.error(`[HITCOUNTER] Debounced save failed:`, err);
+    });
+  }, 1000); // Save after 1 second of inactivity
+}
+
 async function loadHitCounters() {
   try {
     const data = await fs.readFile(HIT_COUNTER_FILE, 'utf-8');
-    hitCounters = JSON.parse(data);
+    // Add JSON validation
+    const parsed = JSON.parse(data);
+    hitCounters = parsed;
     console.log(`[HITCOUNTER] Loaded hit counters from disk.`);
   } catch (err) {
     hitCounters = {};
-    if (err.code !== 'ENOENT') console.error(`[HITCOUNTER] Failed to load:`, err);
-    else console.log(`[HITCOUNTER] No hit counter file found. Starting fresh.`);
+    if (err.code === 'ENOENT') {
+      console.log(`[HITCOUNTER] No hit counter file found. Starting fresh.`);
+    } else if (err instanceof SyntaxError) {
+      console.error(`[HITCOUNTER] JSON corrupted, resetting:`, err.message);
+      // Auto-fix corrupted JSON by saving empty object
+      await saveHitCounters();
+    } else {
+      console.error(`[HITCOUNTER] Failed to load:`, err);
+    }
   }
 }
 
 async function saveHitCounters() {
+  // Prevent concurrent saves
+  if (saveInProgress) {
+    pendingSave = true;
+    return;
+  }
+  
+  saveInProgress = true;
   try {
-    await fs.writeFile(HIT_COUNTER_FILE, JSON.stringify(hitCounters, null, 2));
+    const jsonData = JSON.stringify(hitCounters, null, 2);
+    await fs.writeFile(HIT_COUNTER_FILE, jsonData);
     console.log(`[HITCOUNTER] Saved hit counters to disk.`);
   } catch (err) {
     console.error(`[HITCOUNTER] Failed to save hit counters:`, err);
+  } finally {
+    saveInProgress = false;
+    
+    // If another save was requested while this one was running, do it now
+    if (pendingSave) {
+      pendingSave = false;
+      // Use setTimeout to avoid recursion issues
+      setTimeout(() => saveHitCounters(), 10);
+    }
   }
 }
 
@@ -445,7 +401,9 @@ function incrementHitCounter(groupId, patternRaw) {
   if (!hitCounters[groupId]) hitCounters[groupId] = {};
   if (!hitCounters[groupId][patternRaw]) hitCounters[groupId][patternRaw] = 0;
   hitCounters[groupId][patternRaw] += 1;
-  saveHitCounters();
+  
+  // Use debounced save instead of immediate save to prevent race conditions
+  debouncedSave();
 }
 
 function getHitStatsForGroup(groupId, topN = 5) {
@@ -2002,6 +1960,9 @@ async function startup() {
   await loadSettings();
   await loadAllGroupPatterns();
   await loadHitCounters();
+
+  // Initialize auth system
+  await setupAuth(bot);
 
   // Ensure all whitelisted groups have an action setting
   WHITELISTED_GROUP_IDS.forEach(groupId => {
