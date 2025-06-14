@@ -1,4 +1,4 @@
-// auth.js - Authorization System Module
+// auth.js
 
 import { WHITELISTED_USER_IDS, WHITELISTED_GROUP_IDS } from './config/config.js';
 

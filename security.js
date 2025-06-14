@@ -1,4 +1,4 @@
-// security.js - Pattern security functions
+// security.js
 
 /**
  * Safe regex compilation with basic protections

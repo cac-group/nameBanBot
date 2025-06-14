@@ -1078,7 +1078,6 @@ bot.on('text', async (ctx, next) => {
   let session = adminSessions.get(adminId) || { chatId: ctx.chat.id };
   const input = ctx.message.text.trim();
 
-<<<<<<< HEAD
 if (input.toLowerCase() === '/cancel') {
   console.log(`[ADMIN_TEXT] ${adminId} cancelled current action`);
   session.action = undefined;
@@ -1089,22 +1088,6 @@ if (input.toLowerCase() === '/cancel') {
   await showMainMenu(ctx);
   return;
 }
-=======
-  // Handle commands first
-  if (input.startsWith('/')) {
-    return next(); // Let command handlers deal with it
-  }
-
-  if (input.toLowerCase() === 'cancel') {
-    console.log(`[ADMIN_TEXT] Admin ${adminId} cancelled current action`);
-    session.action = undefined;
-    session.copySourceGroupId = undefined;
-    adminSessions.set(adminId, session);
-    await deleteMenu(ctx, "Action cancelled.");
-    await showMainMenu(ctx);
-    return;
-  }
->>>>>>> 2ecae8bee69e921f3d6c88a77682c0674a0982e6
 
   if (session.action) {
     const groupId = session.selectedGroupId;
